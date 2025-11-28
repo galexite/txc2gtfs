@@ -49,7 +49,6 @@ MIT.
 
 from __future__ import annotations
 
-import functools
 import multiprocessing
 import sqlite3
 import xml.etree.ElementTree as ET
@@ -71,7 +70,7 @@ if TYPE_CHECKING:
     from _typeshed import StrPath
 
 
-def process_file(path: Path, gtfs_db: Path) -> None:
+def parse_txc_to_sql_conn(path: Path, conn: sqlite3.Connection) -> None:
     # If type is string, it is a direct filepath to XML
     data = ET.parse(path)
 
@@ -97,34 +96,30 @@ def process_file(path: Path, gtfs_db: Path) -> None:
     # Parse routes
     routes = get_routes(gtfs_info, data)
 
-    # Initialize database connection
-    with sqlite3.connect(gtfs_db) as conn:
-        # Only export data into db if there exists valid stop_times data
+    if len(stop_times) > 0:
+        cur = conn.cursor()
+        for cls in (AgencyTable,):
+            table = cls(cur)
+            table.populate(cur, data)
+            conn.commit()
 
-        if len(stop_times) > 0:
-            cur = conn.cursor()
-            for cls in (AgencyTable,):
-                table = cls(cur)
-                table.populate(cur, data)
-                conn.commit()
+        stop_times.to_sql(
+            name="stop_times", con=conn, index=False, if_exists="append"
+        )
+        stop_data.to_sql(name="stops", con=conn, index=False, if_exists="append")
+        routes.to_sql(name="routes", con=conn, index=False, if_exists="append")
+        trips.to_sql(name="trips", con=conn, index=False, if_exists="append")
+        calendar.to_sql(name="calendar", con=conn, index=False, if_exists="append")
 
-            stop_times.to_sql(
-                name="stop_times", con=conn, index=False, if_exists="append"
+        if calendar_dates is not None:
+            calendar_dates.to_sql(
+                name="calendar_dates", con=conn, index=False, if_exists="append"
             )
-            stop_data.to_sql(name="stops", con=conn, index=False, if_exists="append")
-            routes.to_sql(name="routes", con=conn, index=False, if_exists="append")
-            trips.to_sql(name="trips", con=conn, index=False, if_exists="append")
-            calendar.to_sql(name="calendar", con=conn, index=False, if_exists="append")
-
-            if calendar_dates is not None:
-                calendar_dates.to_sql(
-                    name="calendar_dates", con=conn, index=False, if_exists="append"
-                )
-        else:
-            print(
-                f"UserWarning: File {path.name} did not contain valid stop_sequence "
-                "data, skipping."
-            )
+    else:
+        print(
+            f"UserWarning: File {path.name} did not contain valid stop_sequence "
+            "data, skipping."
+        )
 
 
 def _iterate_paths(input: Iterable[StrPath]) -> Generator[Path, None, None]:
@@ -141,7 +136,6 @@ def convert(
     output: StrPath,
     append_to_existing: bool = False,
     num_workers: int = 1,
-    file_size_limit: int = 2000,
 ) -> None:
     """
     Converts TransXchange formatted schedule data into GTFS feed.
@@ -158,26 +152,27 @@ def convert(
         GTFS feed.
     worker_cnt : int
         Number of workers to distribute the conversion process. By default the number of CPUs is used.
-    file_size_limit : int
-        File size limit (in megabytes) can be used to skip larger-than-memory XML-files (should not happen).
     """
     input = _iterate_paths(input)
     output = Path(output)
 
     # Filepath for temporary gtfs db
-    gtfs_db = output.parent / "gtfs.db"
+    out_gtfs_db = output.parent / "gtfs.db"
 
     # If append to database is false remove previous gtfs-database if it exists
     if not append_to_existing:
-        gtfs_db.unlink(missing_ok=True)
+        out_gtfs_db.unlink(missing_ok=True)
+
+    def do_parse_txc_to_sql(txc_file: Path) -> None:
+        with sqlite3.connect(out_gtfs_db) as conn:
+            parse_txc_to_sql_conn(txc_file, conn)
 
     # Create workers
     if num_workers > 1:
         with multiprocessing.Pool(num_workers) as pool:
-            _process_file = functools.partial(process_file, gtfs_db=gtfs_db)
-            pool.map(_process_file, input)
+            pool.map(do_parse_txc_to_sql, input)
     else:
-        for file in input:
-            process_file(file, gtfs_db)
+        for txc_file in input:
+            do_parse_txc_to_sql(txc_file)
 
-    export_to_zip(gtfs_db, output)
+    export_to_zip(out_gtfs_db, output)
