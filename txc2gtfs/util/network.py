@@ -1,5 +1,5 @@
+import subprocess
 import urllib.parse
-import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -33,7 +33,7 @@ def download_cached(
             for i in range(1, 4):
                 try:
                     print(f"Retrieving {name} from {url}... (attempt {i})")
-                    urllib.request.urlretrieve(url, tmp)
+                    subprocess.check_call(["curl", "-L", url, "-o", str(tmp)])
                     break
                 except Exception as e:
                     print(f"Exception: {e}")
