@@ -1,5 +1,5 @@
 import warnings
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from typing import cast
 
 import pandas as pd
@@ -44,22 +44,22 @@ def get_calendar_dates(gtfs_info: pd.DataFrame) -> pd.DataFrame | None:
     """
     Parse calendar dates attributes from GTFS info DataFrame.
 
-    TransXChange typically indicates exception in operation using 'AllBankHolidays' as an attribute.
-    Hence, Bank holiday information is retrieved from "https://www.gov.uk/" site that should keep the data up-to-date.
-    If the file (or internet) is not available, a static version of the same file will be used that is bundled with the package.
+    TransXChange typically indicates exception in operation using 'AllBankHolidays' as
+    an attribute. Hence, Bank holiday information is retrieved from the
+    "https://www.gov.uk/" site that should keep the data up-to-date.
 
     There are different bank holidays in different regions in UK.
     Available regions are: 'england-and-wales', 'scotland', 'northern-ireland'
-
     """
     # Get all the non-operative days this feed covers by splitting the list of
     # non-operative days in each trip and uniquing them.
-    non_operative_days = cast("pd.Series[str]",
+    non_operative_days = cast(
+        "pd.Series[str]",
         gtfs_info["non_operative_days"]
         .dropna()
         .str.split("|", expand=False, regex=False)
         .explode(ignore_index=True)
-        .drop_duplicates()
+        .drop_duplicates(),
     )
     if len(non_operative_days) == 0:
         return None
@@ -84,7 +84,7 @@ def get_calendar_dates(gtfs_info: pd.DataFrame) -> pd.DataFrame | None:
     if not bank_holidays:
         return None
 
-    # Iterate over services and produce rows having exception with given bank holiday dates
+    # Iterate over services and produce rows not operating on given bank holiday dates
     def gen_calendar_dates() -> Generator[tuple[str, str, int], None, None]:
         for _, row in gtfs_info.drop_duplicates(subset=["service_id"]).iterrows():  # type: ignore
             # Iterate over exception dates

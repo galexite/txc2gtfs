@@ -97,9 +97,7 @@ def parse_txc_to_sql_conn(path: Path, conn: sqlite3.Connection) -> None:
             table.populate(cur, data, gtfs_info)
             conn.commit()
 
-        stop_times.to_sql(
-            name="stop_times", con=conn, index=False, if_exists="append"
-        )
+        stop_times.to_sql(name="stop_times", con=conn, index=False, if_exists="append")
         trips.to_sql(name="trips", con=conn, index=False, if_exists="append")
         calendar.to_sql(name="calendar", con=conn, index=False, if_exists="append")
 
@@ -133,17 +131,19 @@ def convert(
     Converts TransXchange formatted schedule data into GTFS feed.
 
     input_filepath : str
-        File path to data directory or a ZipFile containing one or multiple TransXchange .xml files.
-        Also nested ZipFiles are supported (i.e. a ZipFile with ZipFile(s) containing .xml files.)
+        File path to data directory or a ZipFile containing one or multiple TransXchange
+        .xml files. Also nested ZipFiles are supported (i.e. a ZipFile with ZipFile(s)
+        containing .xml files.)
     output_filepath : str
         Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
     append_to_existing : bool (default is False)
         Flag for appending to existing gtfs-database. This might be useful if you have
-        TransXchange .xml files distributed into multiple directories (e.g. separate files for
-        train data, tube data and bus data) and you want to merge all those datasets into a single
-        GTFS feed.
+        TransXchange .xml files distributed into multiple directories (e.g. separate
+        files for train data, tube data and bus data) and you want to merge all those
+        datasets into a single GTFS feed.
     worker_cnt : int
-        Number of workers to distribute the conversion process. By default the number of CPUs is used.
+        Number of workers to distribute the conversion process. By default the number of
+        CPUs is used.
     """
     input = _iterate_paths(input)
     output = Path(output)

@@ -57,7 +57,8 @@ def get_bank_holidays() -> set[BankHoliday]:
 
 def get_bank_holiday_dates(gtfs_info: pd.DataFrame) -> list[str]:
     """
-    Retrieve information about UK bank holidays that are during the feed operative period.
+    Retrieve information about UK bank holidays that are during the feed operative
+    period.
     """
     bank_holidays = sorted(get_bank_holidays())
 
