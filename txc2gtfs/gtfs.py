@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import csv
 import sqlite3
-from typing import TYPE_CHECKING
+from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
 
-if TYPE_CHECKING:
-    from _typeshed import StrPath
 
-
-def export_to_zip(db: StrPath, output: StrPath) -> dict[str, pd.DataFrame]:
+def export_to_zip(db: Path, output: Path) -> None:
     """Reads the gtfs database and generates an export dictionary for GTFS"""
     with ZipFile(output, "w", compression=ZIP_DEFLATED) as zf:
 

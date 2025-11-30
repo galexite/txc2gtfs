@@ -15,35 +15,17 @@ def get_direction(direction_id: str) -> Literal[0] | Literal[1]:
 
 def get_stop_times(gtfs_info: pd.DataFrame) -> pd.DataFrame:
     """Extract stop_times attributes from GTFS info DataFrame"""
-    stop_times_cols = [
-        "trip_id",
-        "arrival_time",
-        "departure_time",
-        "stop_id",
-        "stop_sequence",
-        "timepoint",
-    ]
-
     # Select columns
-    stop_times = gtfs_info[stop_times_cols].copy()
-
-    # Drop duplicates (there should not be any but make sure)
-    stop_times = stop_times.drop_duplicates()
-
-    # If there is only a single sequence for a trip, do not export it
-    grouped = stop_times.groupby("trip_id")  # type: ignore
-    filtered_stop_times = pd.DataFrame()
-    for idx, group in grouped:
-        if len(group) > 1:
-            filtered_stop_times = pd.concat(
-                [filtered_stop_times, group], ignore_index=True, sort=False
-            )
-        else:
-            print(
-                f"Trip {idx} does not include a sequence of stops, excluding from GTFS."
-            )
-
-    return filtered_stop_times
+    return gtfs_info[
+        [
+            "trip_id",
+            "arrival_time",
+            "departure_time",
+            "stop_id",
+            "stop_sequence",
+            "timepoint",
+        ]
+    ].dropna()
 
 
 def generate_service_id(stop_times: pd.DataFrame) -> pd.DataFrame:

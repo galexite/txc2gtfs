@@ -3,12 +3,6 @@
 **txc2gtfs** is a library for converting UK public transport data from [TransXChange](https://www.gov.uk/government/collections/transxchange) format
 into [GTFS](https://developers.google.com/transit/gtfs) that can be used with various routing engines such as OpenTripPlanner.
 
-## Note!
-
-This package is still in a Beta-phase, so use it at your own risk.
-If you find an issue, you can contribute and
-help solving them by [raising an issue](https://github.com/HTenkanen/txc2gtfs/issues).
-
 ## Features
 
  - Reads TransXchange xml-files and converts into GTFS feed with all necessary information
@@ -44,7 +38,19 @@ txc2gtfs has following dependencies:
 
 ## Basic usage
 
-After you have installed the library you can use it in a following manner:
+Once checked out, you can install this package using a Python package manager, for example, pip:
+
+```sh
+pip install -e .
+```
+
+Then, either use the command line interface:
+
+```sh
+txc2gtfs path/to/transxchange_data.xml -o path/to/my_converted_gtfs.zip
+```
+
+Or use it as a Python library:
 
 ```python
 >>> import txc2gtfs
@@ -53,28 +59,7 @@ After you have installed the library you can use it in a following manner:
 >>> txc2gtfs.convert(data_dir_for_transxchange_files, output_path)
 ```
 
-There are a few parameters that you can adjust:
-
-```
-input_filepath : str
-    File path to data directory or a ZipFile containing one or multiple TransXchange .xml files.
-    Also nested ZipFiles are supported (i.e. a ZipFile with ZipFile(s) containing .xml files.)
-
-output_filepath : str
-    Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
-
-append_to_existing : bool (default is False)
-    Flag for appending to existing gtfs-database. This might be useful if you have
-    TransXchange .xml files distributed into multiple directories (e.g. separate files for
-    train data, tube data and bus data) and you want to merge all those datasets into a single
-    GTFS feed.
-
-worker_cnt : int
-    Number of workers to distribute the conversion process. By default the number of CPUs is used.
-
-file_size_limit : int
-    File size limit (in megabytes) can be used to skip larger-than-memory XML-files (should not happen).
-```
+See the docstring on `convert` for more information.
 
 ## Output
 

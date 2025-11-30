@@ -43,7 +43,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
 
-    convert(args.input, args.output, args.append, args.workers, args.max_file_size)
+    convert(args.input, args.output, args.append, args.workers)
 
 
 if __name__ == "__main__":

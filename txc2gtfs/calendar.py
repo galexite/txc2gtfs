@@ -65,10 +65,11 @@ def parse_day_range(dayinfo: str) -> pd.DataFrame:
 def get_calendar(gtfs_info: pd.DataFrame):
     """Parse calendar attributes from GTFS info DataFrame"""
     # Parse calendar
-    use_cols = ["service_id", "weekdays", "start_date", "end_date"]
-    calendar = gtfs_info.drop_duplicates(subset=use_cols)
-    calendar = calendar[use_cols].copy()
-    calendar = calendar.reset_index(drop=True)
+    calendar = (
+        gtfs_info[["service_id", "weekdays", "start_date", "end_date"]]
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
 
     # Container for final results
     gtfs_calendar = pd.DataFrame()
@@ -104,7 +105,7 @@ def get_calendar(gtfs_info: pd.DataFrame):
         "start_date",
         "end_date",
     ]
-    gtfs_calendar = gtfs_calendar[col_order].copy()
+    gtfs_calendar = gtfs_calendar[col_order]
 
     # Ensure correct datatypes
     int_types = [

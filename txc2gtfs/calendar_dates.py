@@ -52,36 +52,33 @@ def get_calendar_dates(gtfs_info: pd.DataFrame) -> pd.DataFrame | None:
     Available regions are: 'england-and-wales', 'scotland', 'northern-ireland'
 
     """
-    # Get initial info about non-operative days
-    gtfs_info = gtfs_info.copy()
-    gtfs_info = gtfs_info.dropna(subset=["non_operative_days"])
-    non_operative_values = (
-        s for s in cast(Iterable[str], gtfs_info["non_operative_days"].unique()) if s
+    # Get all the non-operative days this feed covers by splitting the list of
+    # non-operative days in each trip and uniquing them.
+    non_operative_days = cast("pd.Series[str]",
+        gtfs_info["non_operative_days"]
+        .dropna()
+        .str.split("|", expand=False, regex=False)
+        .explode(ignore_index=True)
+        .drop_duplicates()
     )
-
-    # Container for all info
-    non_operatives = set(
-        day for value in non_operative_values for day in value.split("|")
-    )
+    if len(non_operative_days) == 0:
+        return None
 
     # Check if there exists some exceptions that are not known bank holidays
-    for holiday in non_operatives:
-        if (
-            (holiday not in _KNOWN_HOLIDAYS.keys())
-            and (holiday != "AllBankHolidays")
-            and not holiday.endswith("Eve")
-        ):
-            warnings.warn(
-                f"Did not recognize holiday {holiday}",
-                UserWarning,
-                stacklevel=2,
-            )
+    unrecognized_holidays = non_operative_days[
+        ~non_operative_days.isin(_KNOWN_HOLIDAYS)
+        & (non_operative_days != "AllBankHolidays")
+        & ~non_operative_days.str.endswith("Eve")
+    ]
+    if not unrecognized_holidays.empty:
+        warnings.warn(
+            f"Did not recognize holidays: {unrecognized_holidays.tolist()}",
+            UserWarning,
+            stacklevel=2,
+        )
 
-    if len(non_operatives) > 0:
-        # Get bank holidays that are during the operative period of the feed
-        bank_holidays = get_bank_holiday_dates(gtfs_info)
-    else:
-        return None
+    # Get bank holidays that are during the operative period of the feed
+    bank_holidays = get_bank_holiday_dates(gtfs_info)
 
     # Return None if no bank holiday happens to be during the operative period
     if not bank_holidays:
@@ -99,6 +96,6 @@ def get_calendar_dates(gtfs_info: pd.DataFrame) -> pd.DataFrame | None:
                     2,
                 )
 
-    return pd.DataFrame.from_records(  # type: ignore
-        gen_calendar_dates(), columns=["service_id", "date", "exception_type"]
+    return pd.DataFrame.from_records(
+        gen_calendar_dates(), columns=["service_id", "date", "exception_type"] # type: ignore[reportArgumentType]
     )
