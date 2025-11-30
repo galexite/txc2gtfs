@@ -26,19 +26,35 @@ def export_to_zip(db: Path, output: Path) -> None:
             # Stops
             # -----
             stops = pd.read_sql_query("SELECT * FROM stops", conn)
-            if "index" in stops.columns:
-                stops = stops.drop("index", axis=1)
             # Drop duplicates based on stop_id
-            write("stops.txt", stops.drop_duplicates(subset=["stop_id"]))
+            write(
+                "stops.txt",
+                stops.rename(
+                    {
+                        "id": "stop_id",
+                        "name": "stop_name",
+                        "lat": "stop_lat",
+                        "lon": "stop_lon",
+                    }
+                ),
+            )
 
             # Agency
             # ------
             agency = pd.read_sql_query("SELECT * FROM agency", conn)
-            if "index" in agency.columns:
-                agency = agency.drop("index", axis=1)
             # Drop duplicates
-            write("agency.txt", agency.drop_duplicates(subset=["agency_id"]))
-
+            write(
+                "agency.txt",
+                agency.rename(
+                    {
+                        "id": "agency_id",
+                        "name": "agency_name",
+                        "url": "agency_url",
+                        "timezone": "agency_timezone",
+                        "lang": "agency_lang",
+                    }
+                ),
+            )
             # Routes
             # ------
             routes = pd.read_sql_query("SELECT * FROM routes", conn)

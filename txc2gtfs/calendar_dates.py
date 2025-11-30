@@ -96,6 +96,6 @@ def get_calendar_dates(gtfs_info: pd.DataFrame) -> pd.DataFrame | None:
                     2,
                 )
 
-    return pd.DataFrame.from_records(
-        gen_calendar_dates(), columns=["service_id", "date", "exception_type"] # type: ignore[reportArgumentType]
+    return pd.DataFrame(
+        gen_calendar_dates(), columns=["service_id", "date", "exception_type"]
     )

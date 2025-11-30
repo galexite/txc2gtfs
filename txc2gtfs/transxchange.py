@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pandas as pd
 
@@ -12,7 +12,6 @@ from txc2gtfs.calendar_dates import (
     get_non_operation_days,
 )
 from txc2gtfs.routes import get_mode
-from txc2gtfs.stop_times import generate_service_id, get_direction
 from txc2gtfs.util.xml import NS, XMLElement, XMLTree, get_text
 
 
@@ -135,7 +134,7 @@ def get_vehicle_journeys(journeys: Iterator[XMLElement]) -> pd.DataFrame:
             non_operative_days,
         )
 
-    return pd.DataFrame.from_records(  # type: ignore
+    return pd.DataFrame(
         (process_vehicle_journey(journey) for journey in journeys),
         columns=_VEHICLE_JOURNEYS_COLUMNS,
     )
@@ -346,9 +345,7 @@ def process_vehicle_journey(
                 # Update stop number
                 stop_num += 1
 
-        section_times = pd.DataFrame.from_records(
-            gen_timing_links(), columns=_SECTION_TIMES_COLS
-        )  # type: ignore
+        section_times = pd.DataFrame(gen_timing_links(), columns=_SECTION_TIMES_COLS)
 
         # After timing links have been iterated over,
         # the last stop needs to be added separately
@@ -390,6 +387,39 @@ def generate_lines(service: XMLElement) -> Generator[tuple[str, Line], None, Non
         assert id
         name = get_text(line, "txc:LineName")
         yield (id, Line(id, name))
+
+
+def generate_service_id(stop_times: pd.DataFrame) -> pd.DataFrame:
+    """Generate service_id into stop_times DataFrame"""
+
+    # Create column for service_id
+    stop_times["service_id"] = None
+
+    # Parse calendar info
+    calendar_info = stop_times.drop_duplicates(subset=["vehicle_journey_id"])
+
+    # Group by weekdays
+    calendar_groups = calendar_info.groupby("weekdays")  # type: ignore
+
+    # Iterate over groups and create a service_id
+    for _, cgroup in calendar_groups:
+        # Parse all vehicle journey ids
+        vehicle_journey_ids = cast(list[str], cgroup["vehicle_journey_id"].to_list())
+
+        # Parse other items
+        service_ref = cgroup["service_ref"].unique()[0]
+        daygroup = cgroup["weekdays"].unique()[0]
+        start_d = cgroup["start_date"].unique()[0]
+        end_d = cgroup["end_date"].unique()[0]
+
+        # Generate service_id
+        service_id = f"{service_ref}_{start_d}_{end_d}_{daygroup}"
+
+        # Update stop_times service_id
+        stop_times.loc[
+            stop_times["vehicle_journey_id"].isin(vehicle_journey_ids), "service_id"  # type: ignore
+        ] = service_id
+    return stop_times
 
 
 def get_gtfs_info(data: XMLTree) -> pd.DataFrame:
@@ -463,6 +493,16 @@ def parse_runtime_duration(runtime: str) -> int:
         split = runtime.split("S")
         time = time + int(split[0]) * 60
     return time
+
+
+def get_direction(direction_id: str) -> Literal[0] | Literal[1]:
+    """Return boolean direction id"""
+    if direction_id == "inbound":
+        return 0
+    elif direction_id == "outbound":
+        return 1
+
+    raise ValueError(f"Cannot determine direction from {direction_id}")
 
 
 _JOURNEY_PATTERN_COLUMNS = [
@@ -567,7 +607,7 @@ def get_service_journey_patterns(service: XMLElement) -> pd.DataFrame:
                 end_date,
             )
 
-    return pd.DataFrame.from_records(  # type: ignore
+    return pd.DataFrame(
         process_service(service),
         columns=_JOURNEY_PATTERN_COLUMNS,
     )

@@ -62,7 +62,7 @@ from .calendar_dates import get_calendar_dates
 from .gtfs import export_to_zip
 from .routes import get_routes
 from .stop_times import get_stop_times
-from .stops import get_stops
+from .stops import StopsTable
 from .transxchange import get_gtfs_info
 from .trips import get_trips
 
@@ -73,9 +73,6 @@ if TYPE_CHECKING:
 def parse_txc_to_sql_conn(path: Path, conn: sqlite3.Connection) -> None:
     # If type is string, it is a direct filepath to XML
     data = ET.parse(path)
-
-    # Parse stops
-    stop_data = get_stops(data)
 
     # Parse GTFS info containing data about trips, calendar, stop_times and
     # calendar_dates
@@ -98,7 +95,7 @@ def parse_txc_to_sql_conn(path: Path, conn: sqlite3.Connection) -> None:
 
     if len(stop_times) > 0:
         cur = conn.cursor()
-        for cls in (AgencyTable,):
+        for cls in (AgencyTable, StopsTable):
             table = cls(cur)
             table.populate(cur, data)
             conn.commit()
@@ -106,7 +103,6 @@ def parse_txc_to_sql_conn(path: Path, conn: sqlite3.Connection) -> None:
         stop_times.to_sql(
             name="stop_times", con=conn, index=False, if_exists="append"
         )
-        stop_data.to_sql(name="stops", con=conn, index=False, if_exists="append")
         routes.to_sql(name="routes", con=conn, index=False, if_exists="append")
         trips.to_sql(name="trips", con=conn, index=False, if_exists="append")
         calendar.to_sql(name="calendar", con=conn, index=False, if_exists="append")
