@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import TYPE_CHECKING
 
+import pandas as pd
+
 if TYPE_CHECKING:
     import sqlite3
 
@@ -22,7 +24,9 @@ CREATE TABLE IF NOT EXISTS agency (
 )
 """)
 
-    def populate(self, cur: sqlite3.Cursor, data: XMLTree) -> None:
+    def populate(
+        self, cur: sqlite3.Cursor, data: XMLTree, gtfs_info: pd.DataFrame
+    ) -> None:
         def gen_agencies() -> Generator[tuple[str, str], None, None]:
             # Agency id
             for operator_el in data.iterfind("./txc:Operators/txc:Operator", NS):

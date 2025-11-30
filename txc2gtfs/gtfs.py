@@ -30,7 +30,7 @@ def export_to_zip(db: Path, output: Path) -> None:
             write(
                 "stops.txt",
                 stops.rename(
-                    {
+                    columns={
                         "id": "stop_id",
                         "name": "stop_name",
                         "lat": "stop_lat",
@@ -46,7 +46,7 @@ def export_to_zip(db: Path, output: Path) -> None:
             write(
                 "agency.txt",
                 agency.rename(
-                    {
+                    columns={
                         "id": "agency_id",
                         "name": "agency_name",
                         "url": "agency_url",
@@ -55,13 +55,25 @@ def export_to_zip(db: Path, output: Path) -> None:
                     }
                 ),
             )
+
             # Routes
             # ------
             routes = pd.read_sql_query("SELECT * FROM routes", conn)
-            if "index" in routes.columns:
-                routes = routes.drop("index", axis=1)
             # Drop duplicates
-            write("routes.txt", routes.drop_duplicates(subset=["route_id"]))
+            write(
+                "routes.txt",
+                routes.rename(
+                    columns={
+                        "id": "route_id",
+                        "agency_id": "agency_id",
+                        "private_id": "route_private_id",
+                        "long_name": "route_long_name",
+                        "short_name": "route_short_name",
+                        "type": "route_type",
+                        "section_id": "route_section_id",
+                    }
+                ),
+            )
 
             # Trips
             # -----

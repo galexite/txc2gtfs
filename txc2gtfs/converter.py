@@ -60,7 +60,7 @@ from .agency import AgencyTable
 from .calendar import get_calendar
 from .calendar_dates import get_calendar_dates
 from .gtfs import export_to_zip
-from .routes import get_routes
+from .routes import RoutesTable
 from .stop_times import get_stop_times
 from .stops import StopsTable
 from .transxchange import get_gtfs_info
@@ -90,20 +90,16 @@ def parse_txc_to_sql_conn(path: Path, conn: sqlite3.Connection) -> None:
     # Parse calendar_dates
     calendar_dates = get_calendar_dates(gtfs_info)
 
-    # Parse routes
-    routes = get_routes(gtfs_info, data)
-
     if len(stop_times) > 0:
         cur = conn.cursor()
-        for cls in (AgencyTable, StopsTable):
+        for cls in (AgencyTable, StopsTable, RoutesTable):
             table = cls(cur)
-            table.populate(cur, data)
+            table.populate(cur, data, gtfs_info)
             conn.commit()
 
         stop_times.to_sql(
             name="stop_times", con=conn, index=False, if_exists="append"
         )
-        routes.to_sql(name="routes", con=conn, index=False, if_exists="append")
         trips.to_sql(name="trips", con=conn, index=False, if_exists="append")
         calendar.to_sql(name="calendar", con=conn, index=False, if_exists="append")
 

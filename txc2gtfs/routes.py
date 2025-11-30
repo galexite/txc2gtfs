@@ -1,7 +1,15 @@
+from __future__ import annotations
+
 from collections.abc import Generator
+from sqlite3 import Cursor
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
+if TYPE_CHECKING:
+    import sqlite3
+
+from .util.table import Table
 from .util.xml import NS, XMLElement, XMLTree, get_text
 
 
@@ -39,40 +47,57 @@ _ROUTES_COLS = [
 ]
 
 
-def get_routes(gtfs_info: pd.DataFrame, data: XMLTree) -> pd.DataFrame:
-    """Get routes from TransXchange elements"""
+class RoutesTable(Table):
+    def __init__(self, cur: sqlite3.Cursor) -> None:
+        cur.execute("""
+CREATE TABLE IF NOT EXISTS routes (
+    id CHAR PRIMARY KEY,
+    agency_id CHAR,
+    private_id CHAR,
+    long_name VARCHAR,
+    short_name VARCHAR,
+    type SHORT,
+    section_id CHAR,
+    FOREIGN KEY(agency_id) REFERENCES agency(id)
+)
+""")
 
-    def parse_routes() -> Generator[tuple[str | int | None, ...], None, None]:
-        for r in data.iterfind("./txc:Routes/txc:Route", NS):
-            # Get route id
-            route_id = r.get("id")
+    def populate(self, cur: Cursor, data: XMLTree, gtfs_info: pd.DataFrame) -> None:
+        def parse_routes() -> Generator[tuple[str | int | None, ...], None, None]:
+            for r in data.iterfind("./txc:Routes/txc:Route", NS):
+                # Get route id
+                route_id = r.get("id")
 
-            # Get agency_id
-            row = gtfs_info.loc[gtfs_info["route_id"] == route_id].iloc[0]
-            agency_id: str = row["agency_id"]
-            line_name: str = row["line_name"]
+                # Get agency_id
+                row = gtfs_info.loc[gtfs_info["route_id"] == route_id].iloc[0]
+                agency_id: str = row["agency_id"]
+                line_name: str = row["line_name"]
 
-            # Get route long name
-            route_long_name = get_text(r, "txc:Description")
+                # Get route long name
+                route_long_name = get_text(r, "txc:Description")
 
-            # Get route private id
-            route_private_id = get_text(r, "txc:PrivateCode")
+                # Get route private id
+                route_private_id = get_text(r, "txc:PrivateCode")
 
-            # Route Section reference (might be needed somewhere)
-            route_section_id = get_text(r, "txc:RouteSectionRef")
+                # Route Section reference (might be needed somewhere)
+                route_section_id = get_text(r, "txc:RouteSectionRef")
 
-            # Get route_type
-            route_type = get_route_type(data)
+                # Get route_type
+                route_type = get_route_type(data)
 
-            # Generate row
-            yield (
-                route_id,
-                agency_id,
-                route_private_id,
-                route_long_name,
-                line_name,
-                route_type,
-                route_section_id,
-            )
+                # Generate row
+                yield (
+                    route_id,
+                    agency_id,
+                    route_private_id,
+                    route_long_name,
+                    line_name,
+                    route_type,
+                    route_section_id,
+                )
 
-    return pd.DataFrame.from_records(parse_routes(), columns=_ROUTES_COLS)  # type: ignore
+        cur.executemany(
+            "INSERT OR IGNORE INTO routes(id, agency_id, private_id, long_name, "
+            "short_name, type, section_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            parse_routes(),
+        )

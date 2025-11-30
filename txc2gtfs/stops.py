@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS stops (
 )
 """)
 
-    def populate(self, cur: Cursor, data: XMLTree) -> None:
+    def populate(self, cur: Cursor, data: XMLTree, gtfs_info: pd.DataFrame) -> None:
         stop_points = data.find("txc:StopPoints", NS)
         if stop_points is None:
             raise ValueError("No StopPoints element. Could not parse stop information.")
