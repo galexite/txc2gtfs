@@ -9,13 +9,7 @@ from .util.table import Table
 from .util.xml import NS, XMLTree
 
 _NAPTAN_CSV_URL = "https://beta-naptan.dft.gov.uk/Download/National/csv"
-_COLUMNS = {
-    "ATCOCode": "id",  # NOTE: ATCOCode is now the index, so the rename does not apply
-    "CommonName": "name",
-    "Latitude": "lat",
-    "Longitude": "lon",
-}
-
+_COLUMNS = ["ATCOCode", "CommonName", "Latitude", "Longitude"]
 
 def read_naptan_stops() -> pd.DataFrame:
     """
@@ -23,16 +17,13 @@ def read_naptan_stops() -> pd.DataFrame:
     """
     naptan_fp = download_cached(_NAPTAN_CSV_URL, "Stops.csv")
 
-    stops = pd.read_csv(
+    return pd.read_csv(
         naptan_fp,
         header=0,
-        usecols=list(_COLUMNS.keys()),
+        usecols=_COLUMNS,
         index_col="ATCOCode",
         low_memory=False,
     )
-
-    # Rename required columns into GTFS format
-    return stops.rename(columns=_COLUMNS)
 
 
 class StopsTable(Table):
@@ -86,11 +77,8 @@ CREATE TABLE IF NOT EXISTS stops (
         else:
             raise ValueError("No StopPoint or AnnotatedStopPointRef elements.")
 
-        def gen_sql_rows() -> Generator[tuple[str, str, float, float]]:
-            for _, row in naptan_stops.loc[stop_ids].iterrows():
-                yield cast(str, row.name), row["name"], row["lat"], row["lon"]
-
+        stops = naptan_stops.loc[stop_ids][_COLUMNS[1:]]
         cur.executemany(
             "INSERT OR IGNORE INTO stops(id, name, lat, lon) VALUES (?, ?, ?, ?)",
-            gen_sql_rows(),
+            stops.itertuples(),
         )
