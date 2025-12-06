@@ -157,6 +157,7 @@ def convert(
 
     def do_parse_txc_to_sql(txc_file: Path) -> None:
         with sqlite3.connect(out_gtfs_db) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             parse_txc_to_sql_conn(txc_file, conn)
 
     # Create workers
