@@ -51,13 +51,13 @@ class RoutesTable(Table):
     def __init__(self, cur: sqlite3.Cursor) -> None:
         cur.execute("""
 CREATE TABLE IF NOT EXISTS routes (
-    id TEXT PRIMARY KEY,
-    agency_id TEXT,
-    private_id TEXT,
-    long_name TEXT,
-    short_name TEXT,
-    type NUMERIC,
-    section_id TEXT,
+    id CHAR PRIMARY KEY,
+    agency_id CHAR,
+    private_id CHAR,
+    long_name VARCHAR,
+    short_name VARCHAR,
+    type SHORT,
+    section_id CHAR,
     FOREIGN KEY(agency_id) REFERENCES agency(id)
 )
 """)
