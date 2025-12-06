@@ -31,11 +31,12 @@ def read_naptan_stops() -> pd.DataFrame:
 class StopsTable(Table):
     def __init__(self, cur: Cursor) -> None:
         cur.execute("""
-CREATE TABLE IF NOT EXISTS stops (
-    id CHAR(12) PRIMARY KEY,
-    name VARCHAR,
-    lat REAL,
-    lon REAL
+CREATE VIRTUAL TABLE IF NOT EXISTS stops USING rtree(
+    id,
+    minX, maxX,      -- Minimum and maximum X coordinate
+    minY, maxY,      -- Minimum and maximum Y coordinate
+    +atco TEXT,
+    +name TEXT,
 )
 """)
 

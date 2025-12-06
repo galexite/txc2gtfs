@@ -8,6 +8,7 @@ version = "0.4.1"
 description = "A Python tool to convert TransXChange data into GTFS."
 requires-python = ">=3.12"
 dependencies = [
+    "duckdb>=1.4.2",
     "filelock>=3.17.0",
     "lxml>=6.0.0",
     "pandas>=2.2.0",

@@ -16,11 +16,11 @@ class AgencyTable(Table):
     def __init__(self, cur: sqlite3.Cursor) -> None:
         cur.execute("""
 CREATE TABLE IF NOT EXISTS agency (
-    id CHAR(10) PRIMARY KEY,
-    name VARCHAR(255),
-    url VARCHAR(255) DEFAULT 'N/A',
-    timezone VARCHAR(255) DEFAULT 'Europe/London',
-    lang CHAR(2) DEFAULT 'en'
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    url TEXT DEFAULT 'N/A',
+    timezone TEXT DEFAULT 'Europe/London',
+    lang TEXT DEFAULT 'en'
 )
 """)
 
