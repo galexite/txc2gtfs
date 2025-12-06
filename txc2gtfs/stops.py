@@ -1,5 +1,6 @@
 from collections.abc import Generator
 from sqlite3 import Cursor
+from typing import cast
 
 import pandas as pd
 
@@ -9,7 +10,7 @@ from .util.xml import NS, XMLTree
 
 _NAPTAN_CSV_URL = "https://beta-naptan.dft.gov.uk/Download/National/csv"
 _COLUMNS = {
-    "ATCOCode": "id",
+    "ATCOCode": "id",  # NOTE: ATCOCode is now the index, so the rename does not apply
     "CommonName": "name",
     "Latitude": "lat",
     "Longitude": "lon",
@@ -22,7 +23,13 @@ def read_naptan_stops() -> pd.DataFrame:
     """
     naptan_fp = download_cached(_NAPTAN_CSV_URL, "Stops.csv")
 
-    stops = pd.read_csv(naptan_fp, header=0, usecols=_COLUMNS.keys(), low_memory=False)  # type: ignore
+    stops = pd.read_csv(
+        naptan_fp,
+        header=0,
+        usecols=list(_COLUMNS.keys()),
+        index_col="ATCOCode",
+        low_memory=False,
+    )
 
     # Rename required columns into GTFS format
     return stops.rename(columns=_COLUMNS)
@@ -73,20 +80,15 @@ CREATE TABLE IF NOT EXISTS stops (
                 yield stop_id
 
         if stop_points.find("txc:StopPoint", NS) is not None:
-            stop_ids = pd.Series(list(gen_stoppoint_ids()))
+            stop_ids = list(gen_stoppoint_ids())
         elif stop_points.find("txc:AnnotatedStopPointRef", NS):
-            stop_ids = pd.Series(list(gen_annotatedstoppoint_ids()))
+            stop_ids = list(gen_annotatedstoppoint_ids())
         else:
             raise ValueError("No StopPoint or AnnotatedStopPointRef elements.")
 
-        unrecognized_stop_ids = stop_ids[~stop_ids.isin(naptan_stops["id"])]
-        assert unrecognized_stop_ids.empty, (
-            f"Unrecognised stop ids: {unrecognized_stop_ids.to_list()}"
-        )
-
         def gen_sql_rows() -> Generator[tuple[str, str, float, float]]:
-            for _, row in naptan_stops[naptan_stops["id"].isin(stop_ids)].iterrows():
-                yield row["id"], row["name"], row["lat"], row["lon"]
+            for _, row in naptan_stops.loc[stop_ids].iterrows():
+                yield cast(str, row.name), row["name"], row["lat"], row["lon"]
 
         cur.executemany(
             "INSERT OR IGNORE INTO stops(id, name, lat, lon) VALUES (?, ?, ?, ?)",

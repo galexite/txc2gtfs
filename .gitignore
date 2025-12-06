@@ -5,6 +5,8 @@ build/
 dist/
 gtfs/
 *.db
+*.db-shm
+*.db-wal
 *.zip
 *.egg-info
 examples
