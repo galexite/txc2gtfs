@@ -31,7 +31,12 @@ txc2gtfs = "txc2gtfs.cli:main"
 packages = ["txc2gtfs"]
 
 [dependency-groups]
-dev = ["pytest>=8.3.4", "requests>=2.32.3", "ruff>=0.9.6"]
+dev = [
+    "pytest>=8.3.4",
+    "requests>=2.32.3",
+    "ruff>=0.9.6",
+    "types-lxml>=2025.11.25",
+]
 
 [tool.ruff.lint]
 fixable = ["ALL"]

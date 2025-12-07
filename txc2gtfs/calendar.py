@@ -1,6 +1,9 @@
-import pandas as pd
+from typing import cast
 
-from txc2gtfs.util.xml import NS, XMLElement
+import pandas as pd
+from lxml import etree
+
+from txc2gtfs.util.xml import NS
 
 _DAYS_OF_THE_WEEK = [
     "monday",
@@ -13,7 +16,7 @@ _DAYS_OF_THE_WEEK = [
 ]
 
 
-def get_weekday_info(data: XMLElement) -> str | None:
+def _parse_service_operation_days(data: etree.Element) -> str | None:
     """
     Get operating profile information from Services.Service.
 
@@ -26,13 +29,15 @@ def get_weekday_info(data: XMLElement) -> str | None:
     if not weekdays:
         return None
 
-    return "|".join(weekday.tag.rsplit("}", maxsplit=1)[1] for weekday in weekdays)
+    return "|".join(
+        cast(str, weekday.tag).rsplit("}", maxsplit=1)[1] for weekday in weekdays
+    )
 
 
 def parse_day_range(row: pd.Series) -> pd.Series:
     """Parse day range from TransXChange DayOfWeek element"""
 
-    dayinfo = row["weekdays"].lower()
+    dayinfo = cast(str, row["weekdays"]).lower()
     row = pd.concat([row, pd.Series({day: 0 for day in _DAYS_OF_THE_WEEK})])
 
     # Check if dayinfo is specified as day-range
@@ -48,7 +53,7 @@ def parse_day_range(row: pd.Series) -> pd.Series:
     return row.drop("weekdays")
 
 
-def get_calendar(gtfs_info: pd.DataFrame):
+def get_calendar(gtfs_info: pd.DataFrame) -> pd.DataFrame:
     """Parse calendar attributes from GTFS info DataFrame"""
     # Parse calendar
     calendar = (
@@ -59,11 +64,14 @@ def get_calendar(gtfs_info: pd.DataFrame):
     )
 
     # Fix column order
-    return calendar[
-        [
-            "service_id",
-            *_DAYS_OF_THE_WEEK,
-            "start_date",
-            "end_date",
-        ]
-    ]
+    return cast(
+        pd.DataFrame,
+        calendar[
+            [
+                "service_id",
+                *_DAYS_OF_THE_WEEK,
+                "start_date",
+                "end_date",
+            ]
+        ],
+    )

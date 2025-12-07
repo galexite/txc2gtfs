@@ -3,12 +3,13 @@ from collections.abc import Generator
 from typing import cast
 
 import pandas as pd
+from lxml import etree
 
 from txc2gtfs.bank_holidays import get_bank_holiday_dates
-from txc2gtfs.util.xml import NS, XMLElement
+from txc2gtfs.util.xml import NS
 
 
-def get_non_operation_days(data: XMLElement) -> str | None:
+def _parse_service_non_operation_days(data: etree.Element) -> str | None:
     """
     Get days of non-operation.
     """

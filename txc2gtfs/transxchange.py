@@ -1,18 +1,18 @@
-from __future__ import annotations
-
 from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Any, Literal, cast
 
+import numpy as np
 import pandas as pd
+from lxml import etree
 
-from txc2gtfs.calendar import get_weekday_info
+from txc2gtfs.calendar import _parse_service_operation_days
 from txc2gtfs.calendar_dates import (
-    get_non_operation_days,
+    _parse_service_non_operation_days,
 )
-from txc2gtfs.routes import get_mode
-from txc2gtfs.util.xml import NS, XMLElement, XMLTree, get_text
+from txc2gtfs.util.xml import NS, get_text
 
 
 @dataclass
@@ -21,17 +21,40 @@ class Line:
     name: str
 
 
-@dataclass
+@dataclass(slots=True)
 class Service:
     code: str
     journey_patterns: pd.DataFrame
     operation_days: str | None
     non_operation_days: str | None
     lines: dict[str, Line]
+    mode: int
+
+
+type Route = tuple[str, str, str, str]
+type StopPoint = tuple[str, str]
+type Operator = tuple[str, str]
+
+
+@dataclass(slots=True, frozen=True)
+class TransXChange:
+    gtfs_info: pd.DataFrame
+    routes: list[Route]
+
+
+@dataclass(slots=True, frozen=True)
+class VehicleJourney:
+    service_ref: str
+    line_ref: str
+    journey_pattern_id: str
+    vehicle_journey_id: str
+    operation_days: str | None
+    non_operative_days: str | None
+    departure_time: str
 
 
 def get_last_stop_time_info(
-    link: XMLElement,
+    link: etree.Element,
     hour: int,
     current_date: date,
     current_dt: datetime,
@@ -93,21 +116,23 @@ def get_midnight_formatted_times(
     return arrival_hour, departure_hour
 
 
-_VEHICLE_JOURNEYS_COLUMNS = [
-    "vehicle_journey_id",
-    "service_ref",
-    "journey_pattern_id",
-    "weekdays",
-    "non_operative_days",
-]
+_VEHICLE_JOURNEYS_COLUMNS = pd.Index(
+    [
+        "vehicle_journey_id",
+        "service_ref",
+        "journey_pattern_id",
+        "weekdays",
+        "non_operative_days",
+    ]
+)
 
 
-def get_vehicle_journeys(journeys: Iterator[XMLElement]) -> pd.DataFrame:
+def get_vehicle_journeys(journeys: Iterator[etree.Element]) -> pd.DataFrame:
     """Process vehicle journeys"""
 
     # Iterate over VehicleJourneys
     def process_vehicle_journey(
-        journey: XMLElement,
+        journey: etree.Element,
     ) -> tuple[str, str, str, str | None, str | None]:
         # Get service reference
         service_ref = get_text(journey, "txc:ServiceRef")
@@ -120,10 +145,10 @@ def get_vehicle_journeys(journeys: Iterator[XMLElement]) -> pd.DataFrame:
         vehicle_journey_id = get_text(journey, "txc:VehicleJourneyCode")
 
         # Parse weekday operation times from VehicleJourney
-        weekdays = get_weekday_info(journey)
+        weekdays = _parse_service_operation_days(journey)
 
         # Parse calendar dates (exceptions in operation)
-        non_operative_days = get_non_operation_days(journey)
+        non_operative_days = _parse_service_non_operation_days(journey)
 
         # Create gtfs_info row
         return (
@@ -140,35 +165,37 @@ def get_vehicle_journeys(journeys: Iterator[XMLElement]) -> pd.DataFrame:
     )
 
 
-_SECTION_TIMES_COLS = [
-    "stop_id",
-    "stop_sequence",
-    "timepoint",
-    "arrival_time",
-    "departure_time",
-    "route_link_ref",
-    "agency_id",
-    "trip_id",
-    "route_id",
-    "vehicle_journey_id",
-    "service_ref",
-    "direction_id",
-    "line_name",
-    "travel_mode",
-    "trip_headsign",
-    "vehicle_type",
-    "start_date",
-    "end_date",
-    "weekdays",
-    "non_operative_days",
-]
+_SECTION_TIMES_COLS = pd.Index(
+    [
+        "stop_id",
+        "stop_sequence",
+        "timepoint",
+        "arrival_time",
+        "departure_time",
+        "route_link_ref",
+        "agency_id",
+        "trip_id",
+        "route_id",
+        "vehicle_journey_id",
+        "service_ref",
+        "direction_id",
+        "line_name",
+        "travel_mode",
+        "trip_headsign",
+        "vehicle_type",
+        "start_date",
+        "end_date",
+        "weekdays",
+        "non_operative_days",
+    ]
+)
 
 
 def process_vehicle_journey(
-    journey: XMLElement,
-    sections: list[XMLElement],
+    journey: VehicleJourney,
+    sections: list[etree.Element],
     services: dict[str, Service],
-) -> pd.DataFrame | None:
+) -> pd.DataFrame:
     # Get current date for time reference
     current_date = datetime.now().date()
 
@@ -177,65 +204,20 @@ def process_vehicle_journey(
     boarding_time = 0
 
     # Get service reference
-    service_ref = get_text(journey, "txc:ServiceRef")
-    service = services[service_ref]
-
-    # Get line reference
-    line_ref = get_text(journey, "txc:LineRef")
-    line = service.lines[line_ref]
-
-    # Journey pattern reference
-    journey_pattern_id = get_text(journey, "txc:JourneyPatternRef")
-
-    # Vehicle journey id ==> will be used to generate service_id (identifies operative
-    # weekdays)
-    vehicle_journey_id = get_text(journey, "txc:VehicleJourneyCode")
-
-    # Parse weekday operation times from VehicleJourney
-    operation_days = get_weekday_info(journey) or service.operation_days
-
-    # Parse calendar dates (exceptions in operation)
-    non_operative_days = get_non_operation_days(journey) or service.non_operation_days
+    service = services[journey.service_ref]
+    line = service.lines[journey.line_ref]
 
     # Select service journey patterns for given service id
-    service_journey_patterns = service.journey_patterns.loc[
-        service.journey_patterns["journey_pattern_id"] == journey_pattern_id
-    ]
-
-    # Get Journey Pattern Section reference
-    jp_section_references = cast(
-        list[str], service_journey_patterns["jp_section_reference"].to_list()
+    journey_pattern = cast(
+        pd.Series, service.journey_patterns.loc[journey.journey_pattern_id]
     )
 
-    # Parse direction, line_name, travel mode, trip_headsign, vehicle_type, agency_id
-    cols = [
-        "agency_id",
-        "route_id",
-        "direction_id",
-        "travel_mode",
-        "trip_headsign",
-        "vehicle_type",
-        "start_date",
-        "end_date",
-    ]
-    (
-        agency_id,
-        route_id,
-        direction_id,
-        travel_mode,
-        trip_headsign,
-        vehicle_type,
-        start_date,
-        end_date,
-    ) = service_journey_patterns[cols].values[0]
-
     # Ensure integer values
-    direction_id = int(direction_id)
-    travel_mode = int(travel_mode)
+    direction_id = cast(np.int64, journey_pattern["direction_id"])
+    travel_mode = cast(np.int64, journey_pattern["travel_mode"])
 
     # Get departure time
-    departure_time = get_text(journey, "txc:DepartureTime")
-    hour, minute, _ = [int(s) for s in departure_time.split(":", maxsplit=2)]
+    hour, minute, _ = [int(s) for s in journey.departure_time.split(":", maxsplit=2)]
 
     current_dt: datetime | None = None
     section_times: pd.DataFrame | None = None
@@ -249,15 +231,11 @@ def process_vehicle_journey(
 
         # Generate trip_id (same section id might occur with different calendar info,
         # hence attach weekday info as part of trip_id)
-        trip_id = f"{section_id}_{operation_days}_{hour:02}{minute:02}"
-
-        # Check that section-ids match
-        if section_id not in jp_section_references:
-            continue
+        trip_id = f"{section_id}_{journey.operation_days}_{hour:02}{minute:02}"
 
         links = section.findall("txc:JourneyPatternTimingLink", NS)
 
-        def get_duration(link: XMLElement) -> int:
+        def get_duration(link: etree.Element) -> int:
             # Get leg runtime code
             runtime = get_text(link, "txc:RunTime")
 
@@ -326,20 +304,20 @@ def process_vehicle_journey(
                     arrival_t,
                     departure_t,
                     route_link_ref,
-                    agency_id,
+                    journey_pattern["agency_id"],
                     trip_id,
-                    route_id,
-                    vehicle_journey_id,
-                    service_ref,
+                    journey_pattern["route_id"],
+                    journey.vehicle_journey_id,
+                    journey.service_ref,
                     direction_id,
                     line.name,
                     travel_mode,
-                    trip_headsign,
-                    vehicle_type,
-                    start_date,
-                    end_date,
-                    operation_days,
-                    non_operative_days,
+                    journey_pattern["trip_headsign"],
+                    journey_pattern["vehicle_type"],
+                    journey_pattern["start_date"],
+                    journey_pattern["end_date"],
+                    journey.operation_days,
+                    journey.non_operative_days,
                 )
 
                 # Update stop number
@@ -365,8 +343,8 @@ def process_vehicle_journey(
         last_stop["agency_id"] = agency_id
         last_stop["trip_id"] = trip_id
         last_stop["route_id"] = route_id
-        last_stop["vehicle_journey_id"] = vehicle_journey_id
-        last_stop["service_ref"] = service_ref
+        last_stop["vehicle_journey_id"] = journey.vehicle_journey_id
+        last_stop["service_ref"] = journey.service_ref
         last_stop["direction_id"] = direction_id
         last_stop["line_name"] = line.name
         last_stop["travel_mode"] = travel_mode
@@ -374,14 +352,17 @@ def process_vehicle_journey(
         last_stop["vehicle_type"] = vehicle_type
         last_stop["start_date"] = start_date
         last_stop["end_date"] = end_date
-        last_stop["weekdays"] = operation_days
-        last_stop["non_operative_days"] = non_operative_days
+        last_stop["weekdays"] = journey.operation_days
+        last_stop["non_operative_days"] = journey.non_operative_days
         section_times = pd.concat([section_times, last_stop], ignore_index=True)
 
+    assert section_times is not None
     return section_times
 
 
-def generate_lines(service: XMLElement) -> Generator[tuple[str, Line], None, None]:
+def _parse_service_lines(
+    service: etree.Element,
+) -> Generator[tuple[str, Line], None, None]:
     for line in service.iterfind("./txc:Lines/txc:Line", NS):
         id = line.get("id")
         assert id
@@ -422,7 +403,108 @@ def generate_service_id(stop_times: pd.DataFrame) -> pd.DataFrame:
     return stop_times
 
 
-def get_gtfs_info(data: XMLTree) -> pd.DataFrame:
+def _parse_service_mode(service: etree.Element) -> int:
+    """Parse mode from TransXChange value"""
+    match get_text(service, "txc:Mode", default=None):
+        case "tram" | "trolleyBus":
+            return 0
+        case "underground" | "metro":
+            return 1
+        case "rail":
+            return 2
+        case "bus" | "coach":
+            return 3
+        case "ferry":
+            return 4
+
+    return 3  # default to bus
+
+
+def _parse_vehicle_journey(journey: etree.Element) -> VehicleJourney:
+    service_ref = get_text(journey, "txc:ServiceRef")
+    # Get line reference
+    line_ref = get_text(journey, "txc:LineRef")
+
+    # Journey pattern reference
+    journey_pattern_id = get_text(journey, "txc:JourneyPatternRef")
+
+    # Vehicle journey id ==> will be used to generate service_id (identifies operative
+    # weekdays)
+    vehicle_journey_id = get_text(journey, "txc:VehicleJourneyCode")
+
+    # Parse weekday operation times from VehicleJourney
+    operation_days = _parse_service_operation_days(journey)
+
+    # Parse calendar dates (exceptions in operation)
+    non_operative_days = _parse_service_non_operation_days(journey)
+
+    departure_time = get_text(journey, "txc:DepartureTime")
+
+    return VehicleJourney(
+        service_ref,
+        line_ref,
+        journey_pattern_id,
+        vehicle_journey_id,
+        operation_days,
+        non_operative_days,
+        departure_time,
+    )
+
+
+def _parse_route(route: etree.Element) -> Route:
+    # Get route id
+    route_id = route.get("id")
+    assert route_id
+
+    # Get route long name
+    route_long_name = get_text(route, "txc:Description")
+
+    # Get route private id
+    route_private_id = get_text(route, "txc:PrivateCode")
+
+    # Route Section reference (might be needed somewhere)
+    route_section_id = get_text(route, "txc:RouteSectionRef")
+
+    return (
+        route_id,
+        route_private_id,
+        route_long_name,
+        route_section_id,
+    )
+
+
+def _parse_stop_point(stop_point: etree.Element) -> StopPoint:
+    # Stop_id
+    stop_id_el = stop_point.find("txc:AtcoCode", NS) or stop_point.find(
+        "txc:StopPointRef", NS
+    )
+    assert stop_id_el is not None, "No AtcoCode for StopPoint"
+    stop_id = stop_id_el.text
+    assert stop_id, "Empty AtcoCode for StopPoint"
+
+    # Name of the stop
+    stop_name_el = stop_point.find("txc:CommonName", NS)
+    assert stop_name_el is not None, "No CommonName for StopPoint"
+    stop_name = stop_name_el.text
+    assert stop_name, "Empty CommonName for StopPoint"
+
+    return (stop_id, stop_name)
+
+
+def _parse_operator(operator: etree.Element) -> Operator:
+    agency_id = operator.get("id")
+    assert agency_id
+
+    # Agency name
+    agency_name_el = operator.find("txc:TradingName", NS)
+    assert agency_name_el is not None
+    agency_name = agency_name_el.text
+    assert agency_name
+
+    return (agency_id, agency_name)
+
+
+def parse_transxchange_file(path: Path) -> TransXChange:
     """
     Get GTFS info from TransXChange elements.
 
@@ -441,39 +523,68 @@ def get_gtfs_info(data: XMLTree) -> pd.DataFrame:
           direction_id, trip_shortname)
         - Routes: <route_id>, agency_id, route_type, route_short_name, route_long_name
     """
-    sections = data.findall(
-        "./txc:JourneyPatternSections/txc:JourneyPatternSection", NS
-    )
-    journeys = data.iterfind("./txc:VehicleJourneys/txc:VehicleJourney", NS)
+    journey_pattern_sections: list[etree.Element] = []
+    vehicle_journeys: list[VehicleJourney] = []
+    services: dict[str, Service] = {}
+    routes: list[Route] = []
+    stop_points: list[StopPoint] = []
+    operators: list[Operator] = []
 
-    def generate_services() -> Generator[Service, None, None]:
-        for service in data.iterfind("./txc:Services/txc:Service", NS):
-            code = get_text(service, "txc:ServiceCode")
-            yield Service(
-                code=code,
-                journey_patterns=get_service_journey_patterns(service),
-                operation_days=get_weekday_info(service),
-                non_operation_days=get_non_operation_days(service),
-                lines=dict(generate_lines(service)),
-            )
+    for _, elem in etree.iterparse(
+        path,
+        events=("end",),
+        remove_blank_text=True,
+        remove_comments=True,
+        remove_pis=True,
+    ):
+        tag = cast(str, elem.tag).rsplit("}", maxsplit=1)[-1]
+        match tag:
+            case "JourneyPatternSection":
+                journey_pattern_sections.append(elem)
+                continue
 
-    # Get all service journey pattern info
-    services = {service.code: service for service in generate_services()}
+            case "VehicleJourney":
+                vehicle_journeys.append(_parse_vehicle_journey(elem))
+                continue
 
-    # Process
+            case "Service":
+                code = get_text(elem, "txc:ServiceCode")
+                services[code] = Service(
+                    code=code,
+                    journey_patterns=_parse_service_journey_patterns(elem),
+                    operation_days=_parse_service_operation_days(elem),
+                    non_operation_days=_parse_service_non_operation_days(elem),
+                    lines=dict(_parse_service_lines(elem)),
+                    mode=_parse_service_mode(elem),
+                )
+
+            case "Route":
+                routes.append(_parse_route(elem))
+
+            case "StopPoint" | "AnnotatedStopPointRef":
+                stop_points.append(_parse_stop_point(elem))
+
+            case "Operator":
+                operators.append(_parse_operator(elem))
+
+            case _:
+                continue
+
+        elem.clear()
+
     gtfs_info = pd.concat(
         process_vehicle_journey(
-            journey,
-            sections,
+            vehicle_journey,
+            journey_pattern_sections,
             services,
         )
-        for journey in journeys
+        for vehicle_journey in vehicle_journeys
     )
 
     # Generate service_id column into the table
     gtfs_info = generate_service_id(gtfs_info)
 
-    return gtfs_info
+    return TransXChange(gtfs_info, routes)
 
 
 def parse_runtime_duration(runtime: str) -> int:
@@ -505,37 +616,41 @@ def get_direction(direction_id: str) -> Literal[0] | Literal[1]:
     raise ValueError(f"Cannot determine direction from {direction_id}")
 
 
-_JOURNEY_PATTERN_COLUMNS = [
-    "journey_pattern_id",
-    "service_code",
-    "agency_id",
-    "line_name",
-    "travel_mode",
-    "service_description",
-    "trip_headsign",
-    # Links to trips
-    "jp_section_reference",
-    "direction_id",
-    # Route_id linking to routes
-    "route_id",
-    "vehicle_type",
-    "vehicle_description",
-    "start_date",
-    "end_date",
-]
+_JOURNEY_PATTERN_COLUMNS = pd.Index(
+    [
+        "journey_pattern_id",
+        "service_code",
+        "agency_id",
+        "line_name",
+        "travel_mode",
+        "service_description",
+        "trip_headsign",
+        # Links to trips
+        "jp_section_reference",
+        "direction_id",
+        # Route_id linking to routes
+        "route_id",
+        "vehicle_type",
+        "vehicle_description",
+        "start_date",
+        "end_date",
+    ]
+)
 
 
-def get_service_journey_patterns(service: XMLElement) -> pd.DataFrame:
+def _parse_service_journey_patterns(service: etree.Element) -> pd.DataFrame:
     """Retrieve a DataFrame of all JourneyPatterns of the service"""
 
-    def process_service(service: XMLElement) -> Generator[tuple[Any, ...], None, None]:
+    def process_service(
+        service: etree.Element,
+    ) -> Generator[tuple[Any, ...], None, None]:
         # Service description
         service_description: str | None = None
         if service_description_el := service.find("txc:Description", NS):
             service_description = service_description_el.text
 
         # Travel mode
-        mode = get_mode(service)
+        mode = _parse_service_mode(service)
 
         # Line name
         line_name = get_text(service, "./txc:Lines/txc:Line/txc:LineName")
@@ -610,4 +725,4 @@ def get_service_journey_patterns(service: XMLElement) -> pd.DataFrame:
     return pd.DataFrame(
         process_service(service),
         columns=_JOURNEY_PATTERN_COLUMNS,
-    )
+    ).set_index("journey_pattern_id")

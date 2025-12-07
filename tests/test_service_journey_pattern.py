@@ -22,10 +22,10 @@ def test_reading_journey_patterns_from_txc21(test_txc21_data, test_naptan_data):
     import untangle
     from pandas import DataFrame
 
-    from txc2gtfs.transxchange import get_service_journey_patterns
+    from txc2gtfs.transxchange import _parse_service_journey_patterns
 
     data = untangle.parse(test_txc21_data)
-    journey_patterns = get_service_journey_patterns(data)
+    journey_patterns = _parse_service_journey_patterns(data)
 
     # Test type
     assert isinstance(journey_patterns, DataFrame)
@@ -63,10 +63,10 @@ def test_reading_journey_patterns_from_tfl_format(test_tfl_data, test_naptan_dat
     import untangle
     from pandas import DataFrame
 
-    from txc2gtfs.transxchange import get_service_journey_patterns
+    from txc2gtfs.transxchange import _parse_service_journey_patterns
 
     data = untangle.parse(test_tfl_data)
-    journey_patterns = get_service_journey_patterns(data)
+    journey_patterns = _parse_service_journey_patterns(data)
 
     # Test type
     assert isinstance(journey_patterns, DataFrame)

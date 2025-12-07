@@ -51,19 +51,15 @@ from __future__ import annotations
 
 import multiprocessing
 import sqlite3
-import xml.etree.ElementTree as ET
 from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .agency import AgencyTable
 from .calendar import get_calendar
 from .calendar_dates import get_calendar_dates
 from .gtfs import export_to_zip
-from .routes import RoutesTable
 from .stop_times import get_stop_times
-from .stops import StopsTable
-from .transxchange import get_gtfs_info
+from .transxchange import parse_transxchange_file
 from .trips import get_trips
 
 if TYPE_CHECKING:
@@ -71,32 +67,23 @@ if TYPE_CHECKING:
 
 
 def parse_txc_to_sql_conn(path: Path, conn: sqlite3.Connection) -> None:
-    # If type is string, it is a direct filepath to XML
-    data = ET.parse(path)
-
     # Parse GTFS info containing data about trips, calendar, stop_times and
     # calendar_dates
-    gtfs_info = get_gtfs_info(data)
+    txc = parse_transxchange_file(path)
 
     # Parse stop_times
-    stop_times = get_stop_times(gtfs_info)
+    stop_times = get_stop_times(txc.gtfs_info)
 
     # Parse trips
-    trips = get_trips(gtfs_info)
+    trips = get_trips(txc.gtfs_info)
 
     # Parse calendar
-    calendar = get_calendar(gtfs_info)
+    calendar = get_calendar(txc.gtfs_info)
 
     # Parse calendar_dates
-    calendar_dates = get_calendar_dates(gtfs_info)
+    calendar_dates = get_calendar_dates(txc.gtfs_info)
 
     if len(stop_times) > 0:
-        cur = conn.cursor()
-        for cls in (AgencyTable, StopsTable, RoutesTable):
-            table = cls(cur)
-            table.populate(cur, data, gtfs_info)
-            conn.commit()
-
         stop_times.to_sql(name="stop_times", con=conn, index=False, if_exists="append")
         trips.to_sql(name="trips", con=conn, index=False, if_exists="append")
         calendar.to_sql(name="calendar", con=conn, index=False, if_exists="append")

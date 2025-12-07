@@ -53,7 +53,7 @@ def test_calendar_dataframe_tfl(test_tfl_data):
     from pandas import DataFrame
     from pandas.testing import assert_frame_equal
 
-    from txc2gtfs.calendar import get_weekday_info, parse_day_range
+    from txc2gtfs.calendar import _parse_service_operation_days, parse_day_range
 
     data = untangle.parse(test_tfl_data)
 
@@ -89,7 +89,7 @@ def test_calendar_dataframe_tfl(test_tfl_data):
 
     for i, journey in enumerate(vjourneys):
         # Parse weekday operation times from VehicleJourney
-        weekdays = get_weekday_info(journey)
+        weekdays = _parse_service_operation_days(journey)
 
         # Should return text
         assert isinstance(weekdays, str)
@@ -108,7 +108,7 @@ def test_calendar_dataframe_txc21(test_txc21_data):
     from pandas import DataFrame
     from pandas.testing import assert_frame_equal
 
-    from txc2gtfs.calendar import get_weekday_info, parse_day_range
+    from txc2gtfs.calendar import _parse_service_operation_days, parse_day_range
 
     data = untangle.parse(test_txc21_data)
 
@@ -144,7 +144,7 @@ def test_calendar_dataframe_txc21(test_txc21_data):
 
     for i, journey in enumerate(vjourneys):
         # Parse weekday operation times from VehicleJourney
-        weekdays = get_weekday_info(journey)
+        weekdays = _parse_service_operation_days(journey)
 
         # Should return text
         assert isinstance(weekdays, str)
@@ -165,12 +165,12 @@ def test_get_calendar_tfl(test_tfl_data):
     from pandas.testing import assert_frame_equal
 
     from txc2gtfs.calendar import get_calendar
-    from txc2gtfs.transxchange import get_gtfs_info
+    from txc2gtfs.transxchange import parse_transxchange_file
 
     data = untangle.parse(test_tfl_data)
 
     # Get gtfs info
-    gtfs_info = get_gtfs_info(data)
+    gtfs_info = parse_transxchange_file(data)
     assert isinstance(gtfs_info, DataFrame)
 
     # Get GTFS calendar
@@ -215,12 +215,12 @@ def test_get_calendar_txc21(test_txc21_data):
     from pandas.testing import assert_frame_equal
 
     from txc2gtfs.calendar import get_calendar
-    from txc2gtfs.transxchange import get_gtfs_info
+    from txc2gtfs.transxchange import parse_transxchange_file
 
     data = untangle.parse(test_txc21_data)
 
     # Get gtfs info
-    gtfs_info = get_gtfs_info(data)
+    gtfs_info = parse_transxchange_file(data)
     assert isinstance(gtfs_info, DataFrame)
 
     # Get GTFS calendar
