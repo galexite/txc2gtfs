@@ -49,9 +49,9 @@ MIT.
 
 from __future__ import annotations
 
-import multiprocessing
 import sqlite3
 from collections.abc import Generator, Iterable
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -149,8 +149,8 @@ def convert(
 
     # Create workers
     if num_workers > 1:
-        with multiprocessing.Pool(num_workers) as pool:
-            pool.map(do_parse_txc_to_sql, input)
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            executor.map(do_parse_txc_to_sql, input)
     else:
         for txc_file in input:
             do_parse_txc_to_sql(txc_file)

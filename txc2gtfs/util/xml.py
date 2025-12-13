@@ -9,20 +9,14 @@ NS = {"txc": "http://www.transxchange.org.uk/"}
 
 
 @overload
-def get_text[T](base: etree.Element, path: str, *, default: T) -> str | T: ...
+def get_text(base: etree.Element, path: str, *, default: str) -> str: ...
 
 
 @overload
 def get_text(base: etree.Element, path: str) -> str: ...
 
 
-def get_text[T](base: etree.Element, path: str, **kwargs: T) -> str | T:
-    el = base.find(path, NS)
-    if "default" in kwargs and el is None:
-        return kwargs["default"]
-    assert el is not None
-    text = el.text
-    if "default" in kwargs:
-        return text or kwargs["default"]
-    assert text
+def get_text(base: etree.Element, path: str, **kwargs: str) -> str:
+    text = base.findtext(path, kwargs.get("default"), NS)
+    assert text, f"Could not find {path} in {base}"
     return text

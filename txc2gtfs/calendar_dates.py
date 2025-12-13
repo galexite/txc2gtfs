@@ -21,7 +21,8 @@ def _parse_service_non_operation_days(data: etree.Element) -> str | None:
         return None
 
     return "|".join(
-        weekday.tag.rsplit("}", maxsplit=1)[1] for weekday in non_operation_days
+        cast(str, weekday.tag).rsplit("}", maxsplit=1)[1]
+        for weekday in non_operation_days
     )
 
 
@@ -55,7 +56,7 @@ def get_calendar_dates(gtfs_info: pd.DataFrame) -> pd.DataFrame | None:
     # Get all the non-operative days this feed covers by splitting the list of
     # non-operative days in each trip and uniquing them.
     non_operative_days = cast(
-        "pd.Series[str]",
+        pd.Series,
         gtfs_info["non_operative_days"]
         .dropna()
         .str.split("|", expand=False, regex=False)
@@ -66,11 +67,14 @@ def get_calendar_dates(gtfs_info: pd.DataFrame) -> pd.DataFrame | None:
         return None
 
     # Check if there exists some exceptions that are not known bank holidays
-    unrecognized_holidays = non_operative_days[
-        ~non_operative_days.isin(_KNOWN_HOLIDAYS)
-        & (non_operative_days != "AllBankHolidays")
-        & ~non_operative_days.str.endswith("Eve")
-    ]
+    unrecognized_holidays = cast(
+        pd.Series,
+        non_operative_days[
+            ~non_operative_days.isin(_KNOWN_HOLIDAYS)
+            & (non_operative_days != "AllBankHolidays")
+            & ~non_operative_days.str.endswith("Eve")
+        ],
+    )
     if not unrecognized_holidays.empty:
         warnings.warn(
             f"Did not recognize holidays: {unrecognized_holidays.tolist()}",
@@ -92,11 +96,11 @@ def get_calendar_dates(gtfs_info: pd.DataFrame) -> pd.DataFrame | None:
             for date in bank_holidays:
                 # Generate row
                 yield (
-                    row["service_id"],
+                    cast(str, row["service_id"]),
                     date,
                     2,
                 )
 
     return pd.DataFrame(
-        gen_calendar_dates(), columns=["service_id", "date", "exception_type"]
+        gen_calendar_dates(), columns=pd.Index(["service_id", "date", "exception_type"])
     )
