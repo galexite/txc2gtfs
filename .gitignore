@@ -11,3 +11,4 @@ gtfs/
 *.egg-info
 examples
 .vscode/launch.json
+*.csv

@@ -1,3 +1,4 @@
+from decimal import Decimal
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from pathlib import Path
@@ -21,6 +22,8 @@ class TransXChange:
     routes: pd.DataFrame | None
     stop_points: pd.DataFrame | None
     operators: pd.DataFrame | None
+    route_sections: pd.DataFrame | None
+    route_locations: pd.DataFrame | None
 
 
 def _get_midnight_formatted_times(
@@ -346,6 +349,64 @@ def _parse_services(services: etree.Element) -> pd.DataFrame:
     return df
 
 
+def _parse_route_sections(
+    route_sections: etree.Element,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def generate_route_link_rows():
+        for route_section in route_sections.findall("./txc:RouteSection", NS):
+            id = route_section.get("id")
+            assert id
+            for link_seq_num, link in enumerate(
+                route_section.findall("./txc:RouteLink", NS)
+            ):
+                link_id = link.get("id")
+                assert link_id
+                link_from = link.findtext("./txc:From/txc:StopPointRef", None, NS)
+                assert link_from
+                link_to = link.findtext("./txc:To/txc:StopPointRef", None, NS)
+                assert link_to
+                distance = link.findtext("./txc:Distance", None, NS)
+                assert distance
+
+                yield {
+                    "route_section_id": id,
+                    "route_link_id": link_id,
+                    "route_link_seq_num": link_seq_num,
+                    "route_link_from": link_from,
+                    "route_link_to": link_to,
+                    "route_link_distance": int(distance),
+                }
+
+    route_link_df = pd.DataFrame(generate_route_link_rows())
+    route_link_df.set_index(["route_section_id", "route_link_id"], inplace=True)
+
+    def generate_route_track_rows():
+        for link in route_sections.findall("./txc:RouteSection/txc:RouteLink", NS):
+            link_id = link.get("id")
+            for loc_seq_num, loc in enumerate(
+                link.findall("./txc:Track/txc:Mapping/txc:Location", NS)
+            ):
+                loc_id = loc.get("id")
+                assert loc_id
+                loc_lat = loc.findtext("./txc:Latitude", None, NS)
+                assert loc_lat
+                loc_lon = loc.findtext("./txc:Longitude", None, NS)
+                assert loc_lon
+
+                yield {
+                    "route_link_id": link_id,
+                    "location_id": loc_id,
+                    "location_seq_num": loc_seq_num,
+                    "latitude": Decimal(loc_lat),
+                    "longitude": Decimal(loc_lon),
+                }
+
+    route_locations_df = pd.DataFrame(generate_route_track_rows())
+    route_locations_df.set_index(["route_link_id", "location_id"], inplace=True)
+
+    return route_link_df, route_locations_df
+
+
 def parse_transxchange_file(path: Path) -> TransXChange:
     """
     Get GTFS info from TransXChange elements.
@@ -371,6 +432,8 @@ def parse_transxchange_file(path: Path) -> TransXChange:
     routes: pd.DataFrame | None = None
     stop_points: pd.DataFrame | None = None
     operators: pd.DataFrame | None = None
+    route_sections: pd.DataFrame | None = None
+    route_locations: pd.DataFrame | None = None
 
     for _, elem in etree.iterparse(
         path,
@@ -405,6 +468,10 @@ def parse_transxchange_file(path: Path) -> TransXChange:
                 assert operators is None
                 operators = _parse_operators(elem)
 
+            case "RouteSections":
+                assert route_sections is None
+                route_sections, route_locations = _parse_route_sections(elem)
+
             case _:
                 continue
 
@@ -417,4 +484,6 @@ def parse_transxchange_file(path: Path) -> TransXChange:
         routes=routes,
         stop_points=stop_points,
         operators=operators,
+        route_sections=route_sections,
+        route_locations=route_locations,
     )
