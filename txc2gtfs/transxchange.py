@@ -1,8 +1,9 @@
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal, cast
+from uuid import UUID
 
 import pandas as pd
 from lxml import etree
@@ -15,6 +16,14 @@ from txc2gtfs.util.xml import NS
 
 
 @dataclass(slots=True, frozen=True)
+class TransXChangeMeta:
+    filename: str | None
+    creation_date: datetime | None
+    modification_date: datetime | None
+    revision_num: int | None
+
+
+@dataclass(slots=True, frozen=True)
 class TransXChange:
     journey_pattern_sections: pd.DataFrame | None
     vehicle_journeys: pd.DataFrame | None
@@ -24,6 +33,7 @@ class TransXChange:
     operators: pd.DataFrame | None
     route_sections: pd.DataFrame | None
     route_locations: pd.DataFrame | None
+    metadata: TransXChangeMeta
 
 
 def _parse_service_journey_pattern_sections(sections: etree.Element) -> pd.DataFrame:
@@ -404,6 +414,12 @@ def parse_transxchange_file(path: Path) -> TransXChange:
     route_sections: pd.DataFrame | None = None
     route_locations: pd.DataFrame | None = None
 
+    # Metadata
+    filename: str | None = None
+    creation_date: datetime | None = None
+    modification_date: datetime | None = None
+    revision_num: int | None = None
+
     for _, elem in etree.iterparse(
         path,
         events=("end",),
@@ -441,6 +457,15 @@ def parse_transxchange_file(path: Path) -> TransXChange:
                 assert route_sections is None
                 route_sections, route_locations = _parse_route_sections(elem)
 
+            case "TransXChange":
+                filename = elem.get("FileName")
+                if date := elem.get("CreationDateTime"):
+                    creation_date = datetime.fromisoformat(date)
+                if date := elem.get("ModificationDateTime"):
+                    modification_date = datetime.fromisoformat(date)
+                if num := elem.get("RevisionNumber"):
+                    revision_num = int(num)
+
             case _:
                 continue
 
@@ -455,4 +480,10 @@ def parse_transxchange_file(path: Path) -> TransXChange:
         operators=operators,
         route_sections=route_sections,
         route_locations=route_locations,
+        metadata=TransXChangeMeta(
+            filename=filename,
+            creation_date=creation_date,
+            modification_date=modification_date,
+            revision_num=revision_num,
+        ),
     )
