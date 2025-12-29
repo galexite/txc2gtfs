@@ -1,6 +1,6 @@
-from decimal import Decimal
 from dataclasses import dataclass
 from datetime import date, datetime, time
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal, cast
 
@@ -24,37 +24,6 @@ class TransXChange:
     operators: pd.DataFrame | None
     route_sections: pd.DataFrame | None
     route_locations: pd.DataFrame | None
-
-
-def _get_midnight_formatted_times(
-    arrival_hour: int,
-    departure_hour: int,
-    hour: int,
-    current_date: date,
-    current_dt: datetime,
-    departure_dt: datetime,
-) -> tuple[int, int]:
-    # If the arrival / departure hour is smaller than the initialized hour,
-    # it means that the trip is extending to the next day. In that case,
-    # the hour info should be extending to numbers over 24. E.g. if trip starts
-    # at 23:30 and ends at 00:25, the arrival_time should be determined as 24:25
-    # to avoid negative time hops.
-    if arrival_hour < hour:
-        # Calculate time delta (in hours) between the initial trip datetime and the
-        # current and add 1 to hop over the midnight to the next day
-        last_second_of_day = datetime.combine(current_date, time(23, 59, 59))
-        arrival_over_midnight_surplus = (
-            int(((current_dt - last_second_of_day) / 60 / 60).seconds) + 1
-        )
-        departure_over_midnight_surplus = (
-            int(((departure_dt - last_second_of_day) / 60 / 60).seconds) + 1
-        )
-
-        # Update the hour values with midnight surplus
-        arrival_hour = 23 + arrival_over_midnight_surplus
-        departure_hour = 23 + departure_over_midnight_surplus
-
-    return arrival_hour, departure_hour
 
 
 def _parse_service_journey_pattern_sections(sections: etree.Element) -> pd.DataFrame:
@@ -442,7 +411,7 @@ def parse_transxchange_file(path: Path) -> TransXChange:
         remove_comments=True,
         remove_pis=True,
     ):
-        tag = cast(str, elem.tag).rsplit("}", maxsplit=1)[-1]
+        tag = etree.QName(cast(str, elem.tag)).localname
         match tag:
             case "JourneyPatternSections":
                 assert journey_pattern_sections is None
