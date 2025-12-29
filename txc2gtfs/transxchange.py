@@ -3,7 +3,6 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal, cast
-from uuid import UUID
 
 import pandas as pd
 from lxml import etree
