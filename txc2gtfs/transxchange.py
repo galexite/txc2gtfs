@@ -1,3 +1,4 @@
+import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,10 +18,15 @@ from txc2gtfs.util.xml import NS
 
 @dataclass(slots=True, frozen=True)
 class TransXChangeMeta:
-    filename: str | None
-    creation_date: datetime | None
+    filename: str
+    creation_date: datetime
     modification_date: datetime | None
-    revision_num: int | None
+    revision_num: int
+
+    dataset_id: str = dataclasses.field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "dataset_id", f"{self.filename}#{self.revision_num}")
 
 
 @dataclass(slots=True, frozen=True)
@@ -53,7 +59,7 @@ class _ParseResult(TypedDict):
     route_locations: NotRequired[pd.DataFrame]
 
 
-type _ParserFn = Callable[[etree.Element], _ParseResult]
+type _ParserFn = Callable[[etree.Element, TransXChangeMeta], _ParseResult]
 
 _PARSERS: dict[str, _ParserFn] = {}
 
@@ -67,7 +73,9 @@ def _register_parser(elem_name: str) -> Callable[[_ParserFn], _ParserFn]:
 
 
 @_register_parser("JourneyPatternSections")
-def _parse_journey_pattern_sections(sections: etree.Element) -> _ParseResult:
+def _parse_journey_pattern_sections(
+    sections: etree.Element, metadata: TransXChangeMeta
+) -> _ParseResult:
     def create_row(
         journey_pattern_section_id: str,
         journey_pattern_timing_link_id: str,
@@ -154,7 +162,9 @@ def _parse_service_mode(service: etree.Element) -> int:
 
 
 @_register_parser("VehicleJourneys")
-def _parse_vehicle_journeys(journeys: etree.Element) -> _ParseResult:
+def _parse_vehicle_journeys(
+    journeys: etree.Element, metadata: TransXChangeMeta
+) -> _ParseResult:
     def generate_rows():
         journey_qname = etree.QName(NS["txc"], "VehicleJourney")
 
@@ -200,7 +210,7 @@ def _parse_vehicle_journeys(journeys: etree.Element) -> _ParseResult:
 
 
 @_register_parser("Routes")
-def _parse_routes(routes: etree.Element) -> _ParseResult:
+def _parse_routes(routes: etree.Element, metadata: TransXChangeMeta) -> _ParseResult:
     def generate_rows():
         route_qname = etree.QName(NS["txc"], "Route")
 
@@ -233,7 +243,9 @@ def _parse_routes(routes: etree.Element) -> _ParseResult:
 
 
 @_register_parser("StopPoints")
-def _parse_stop_points(points: etree.Element) -> _ParseResult:
+def _parse_stop_points(
+    points: etree.Element, metadata: TransXChangeMeta
+) -> _ParseResult:
     def generate_rows():
         point_qname = etree.QName(NS["txc"], "AnnotatedStopPointRef")
 
@@ -256,7 +268,9 @@ def _parse_stop_points(points: etree.Element) -> _ParseResult:
 
 
 @_register_parser("Operators")
-def _parse_operators(operators: etree.Element) -> _ParseResult:
+def _parse_operators(
+    operators: etree.Element, metadata: TransXChangeMeta
+) -> _ParseResult:
     def generate_rows():
         operator_qname = etree.QName(NS["txc"], "Operator")
 
@@ -307,7 +321,9 @@ def _parse_direction(direction: str) -> Literal[0] | Literal[1]:
 
 
 @_register_parser("Services")
-def _parse_services(services: etree.Element) -> _ParseResult:
+def _parse_services(
+    services: etree.Element, metadata: TransXChangeMeta
+) -> _ParseResult:
     def generate_rows():
         service_qname = etree.QName(NS["txc"], "Service")
 
@@ -400,7 +416,7 @@ def _parse_services(services: etree.Element) -> _ParseResult:
 
 @_register_parser("RouteSections")
 def _parse_route_sections(
-    route_sections: etree.Element,
+    route_sections: etree.Element, metadata: TransXChangeMeta
 ) -> _ParseResult:
     def generate_route_link_rows():
         route_section_qname = etree.QName(NS["txc"], "RouteSection")
@@ -464,27 +480,25 @@ def _parse_route_sections(
     return {"route_sections": route_sections_df, "route_locations": route_locations_df}
 
 
-@_register_parser("TransXChange")
-def _parse_metadata(elem: etree.Element) -> _ParseResult:
+def _parse_metadata(elem: etree.Element) -> TransXChangeMeta:
     filename = elem.get("FileName")
+    assert filename is not None
     creation_date = elem.get("CreationDateTime")
-    if creation_date is not None:
-        creation_date = datetime.fromisoformat(creation_date)
+    assert creation_date is not None
+    creation_date = datetime.fromisoformat(creation_date)
     modification_date = elem.get("ModificationDateTime")
     if modification_date is not None:
         modification_date = datetime.fromisoformat(modification_date)
     revision_num = elem.get("RevisionNumber")
-    if revision_num is not None:
-        revision_num = int(revision_num)
+    assert revision_num is not None
+    revision_num = int(revision_num)
 
-    return {
-        "metadata": TransXChangeMeta(
-            filename=filename,
-            creation_date=creation_date,
-            modification_date=modification_date,
-            revision_num=revision_num,
-        )
-    }
+    return TransXChangeMeta(
+        filename=filename,
+        creation_date=creation_date,
+        modification_date=modification_date,
+        revision_num=revision_num,
+    )
 
 
 def parse_transxchange_file(path: Path) -> TransXChange:
@@ -508,17 +522,30 @@ def parse_transxchange_file(path: Path) -> TransXChange:
     """
     parsers = _PARSERS
     kwargs: _ParseResult = {}
+    metadata: TransXChangeMeta | None = None
 
-    for _, elem in etree.iterparse(
+    for event, elem in etree.iterparse(
         path,
-        ("end",),
-        tag=[etree.QName(NS["txc"], tag) for tag in parsers.keys()],
+        ("start", "end"),
+        tag=[
+            etree.QName(NS["txc"], "TransXChange"),
+            *(etree.QName(NS["txc"], tag) for tag in parsers.keys()),
+        ],
         remove_blank_text=True,
         remove_comments=True,
         remove_pis=True,
     ):
         tag = etree.QName(cast(str, elem.tag)).localname
-        kwargs.update(parsers[tag](elem))
+        if event == "start":
+            if tag == "TransXChange":
+                metadata = _parse_metadata(elem)
+                kwargs["metadata"] = metadata
+            continue
+        elif tag == "TransXChange":
+            continue
+
+        assert metadata is not None
+        kwargs.update(parsers[tag](elem, metadata))
         elem.clear()
 
     assert "metadata" in kwargs
