@@ -1,8 +1,9 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal, NotRequired, TypedDict, cast
 
 import pandas as pd
 from lxml import etree
@@ -24,18 +25,49 @@ class TransXChangeMeta:
 
 @dataclass(slots=True, frozen=True)
 class TransXChange:
-    journey_pattern_sections: pd.DataFrame | None
-    vehicle_journeys: pd.DataFrame | None
-    services: pd.DataFrame | None
-    routes: pd.DataFrame | None
-    stop_points: pd.DataFrame | None
-    operators: pd.DataFrame | None
-    route_sections: pd.DataFrame | None
-    route_locations: pd.DataFrame | None
     metadata: TransXChangeMeta
+    journey_pattern_sections: pd.DataFrame | None = None
+    vehicle_journeys: pd.DataFrame | None = None
+    services: pd.DataFrame | None = None
+    routes: pd.DataFrame | None = None
+    stop_points: pd.DataFrame | None = None
+    operators: pd.DataFrame | None = None
+    route_sections: pd.DataFrame | None = None
+    route_locations: pd.DataFrame | None = None
 
 
-def _parse_service_journey_pattern_sections(sections: etree.Element) -> pd.DataFrame:
+class _ParseResult(TypedDict):
+    """
+    Utility type to help type-check dicts returned by parser functions.
+    Must be kept up-to-date to match above.
+    """
+
+    metadata: NotRequired[TransXChangeMeta]
+    journey_pattern_sections: NotRequired[pd.DataFrame]
+    vehicle_journeys: NotRequired[pd.DataFrame]
+    services: NotRequired[pd.DataFrame]
+    routes: NotRequired[pd.DataFrame]
+    stop_points: NotRequired[pd.DataFrame]
+    operators: NotRequired[pd.DataFrame]
+    route_sections: NotRequired[pd.DataFrame]
+    route_locations: NotRequired[pd.DataFrame]
+
+
+type _ParserFn = Callable[[etree.Element], _ParseResult]
+
+_PARSERS: dict[str, _ParserFn] = {}
+
+
+def _register_parser(elem_name: str) -> Callable[[_ParserFn], _ParserFn]:
+    def decorate(fn: _ParserFn) -> _ParserFn:
+        _PARSERS[elem_name] = fn
+        return fn
+
+    return decorate
+
+
+@_register_parser("JourneyPatternSections")
+def _parse_journey_pattern_sections(sections: etree.Element) -> _ParseResult:
     def create_row(
         journey_pattern_section_id: str,
         journey_pattern_timing_link_id: str,
@@ -60,38 +92,48 @@ def _parse_service_journey_pattern_sections(sections: etree.Element) -> pd.DataF
         }
 
     def generate_rows():
-        for section in sections.findall("./txc:JourneyPatternSection", NS):
+        section_qname = etree.QName(NS["txc"], "JourneyPatternSection")
+        link_qname = etree.QName(NS["txc"], "JourneyPatternTimingLink")
+
+        for section in sections.iterchildren(section_qname):
             journey_pattern_section_id = section.get("id")
             assert journey_pattern_section_id
-            links = section.findall("./txc:JourneyPatternTimingLink", NS)
-            stop_sequence = 1
-            for link in links:
+            last_link: etree.Element | None = None
+            for link in section.iterchildren(link_qname):
+                if last_link is not None:
+                    last_link.clear()
                 from_point = link.find("./txc:From", NS)
                 assert from_point is not None
                 journey_pattern_timing_link_id = link.get("id")
                 assert journey_pattern_timing_link_id is not None
+
                 yield create_row(
                     journey_pattern_section_id,
                     journey_pattern_timing_link_id,
                     from_point,
                 )
 
-                stop_sequence += 1
+                last_link = link
 
             # For the last stop, we'll take the 'To' segment.
-            to_point = links[-1].find("./txc:To", NS)
+            assert last_link is not None
+            to_point = last_link.find("./txc:To", NS)
             assert to_point is not None
-            journey_pattern_timing_link_id = links[-1].get("id")
+            journey_pattern_timing_link_id = last_link.get("id")
             assert journey_pattern_timing_link_id
+
             yield create_row(
                 journey_pattern_section_id, journey_pattern_timing_link_id, to_point
             )
+
+            last_link.clear()
+            section.clear()
 
     df = pd.DataFrame(generate_rows())
     df.set_index(
         ["journey_pattern_section_id", "journey_pattern_timing_link_id"], inplace=True
     )
-    return df
+    return {"journey_pattern_sections": df}
 
 
 def _parse_service_mode(service: etree.Element) -> int:
@@ -111,9 +153,12 @@ def _parse_service_mode(service: etree.Element) -> int:
     return 3  # default to bus
 
 
-def _parse_vehicle_journeys(journeys: etree.Element) -> pd.DataFrame:
+@_register_parser("VehicleJourneys")
+def _parse_vehicle_journeys(journeys: etree.Element) -> _ParseResult:
     def generate_rows():
-        for journey in journeys.findall("./txc:VehicleJourney", NS):
+        journey_qname = etree.QName(NS["txc"], "VehicleJourney")
+
+        for journey in journeys.iterchildren(journey_qname):
             service_ref = journey.findtext("txc:ServiceRef", None, NS)
             # Get line reference
             line_ref = journey.findtext("txc:LineRef", None, NS)
@@ -147,14 +192,19 @@ def _parse_vehicle_journeys(journeys: etree.Element) -> pd.DataFrame:
                 "departure_time": departure_time,
             }
 
+            journey.clear()
+
     df = pd.DataFrame(generate_rows())
     df.set_index(["service_ref", "line_ref", "vehicle_journey_id"], inplace=True)
-    return df
+    return {"vehicle_journeys": df}
 
 
-def _parse_routes(routes: etree.Element) -> pd.DataFrame:
+@_register_parser("Routes")
+def _parse_routes(routes: etree.Element) -> _ParseResult:
     def generate_rows():
-        for route in routes.findall("./txc:Route", NS):
+        route_qname = etree.QName(NS["txc"], "Route")
+
+        for route in routes.iterchildren(route_qname):
             # Get route id
             route_id = route.get("id")
             assert route_id
@@ -175,14 +225,19 @@ def _parse_routes(routes: etree.Element) -> pd.DataFrame:
                 "route_section_id": route_section_id,
             }
 
+            route.clear()
+
     df = pd.DataFrame(generate_rows())
     df.set_index("route_id", inplace=True)
-    return df
+    return {"routes": df}
 
 
-def _parse_stop_points(points: etree.Element) -> pd.DataFrame:
+@_register_parser("StopPoints")
+def _parse_stop_points(points: etree.Element) -> _ParseResult:
     def generate_rows():
-        for point in points.findall("./txc:AnnotatedStopPointRef", NS):
+        point_qname = etree.QName(NS["txc"], "AnnotatedStopPointRef")
+
+        for point in points.iterchildren(point_qname):
             stop_id = point.findtext("./txc:AtcoCode", None, NS) or point.findtext(
                 "./txc:StopPointRef", None, NS
             )
@@ -193,14 +248,19 @@ def _parse_stop_points(points: etree.Element) -> pd.DataFrame:
 
             yield {"stop_id": stop_id, "stop_name": stop_name}
 
+            point.clear()
+
     df = pd.DataFrame(generate_rows())
     df.set_index("stop_id", inplace=True)
-    return df
+    return {"stop_points": df}
 
 
-def _parse_operators(operators: etree.Element) -> pd.DataFrame:
+@_register_parser("Operators")
+def _parse_operators(operators: etree.Element) -> _ParseResult:
     def generate_rows():
-        for operator in operators.findall("./txc:Operator", NS):
+        operator_qname = etree.QName(NS["txc"], "Operator")
+
+        for operator in operators.iterchildren(operator_qname):
             agency_id = operator.get("id")
             assert agency_id
 
@@ -210,9 +270,11 @@ def _parse_operators(operators: etree.Element) -> pd.DataFrame:
 
             yield {"agency_id": agency_id, "agency_name": agency_name}
 
+            operator.clear()
+
     df = pd.DataFrame(generate_rows())
     df.set_index("agency_id", inplace=True)
-    return df
+    return {"operators": df}
 
 
 def _parse_runtime_duration(runtime: str) -> int:
@@ -244,9 +306,12 @@ def _parse_direction(direction: str) -> Literal[0] | Literal[1]:
     raise ValueError(f"Cannot determine direction from {direction}")
 
 
-def _parse_services(services: etree.Element) -> pd.DataFrame:
+@_register_parser("Services")
+def _parse_services(services: etree.Element) -> _ParseResult:
     def generate_rows():
-        for service in services.findall("./txc:Service", NS):
+        service_qname = etree.QName(NS["txc"], "Service")
+
+        for service in services.iterchildren(service_qname):
             # Service code
             service_code = service.findtext("txc:ServiceCode", None, NS)
 
@@ -284,25 +349,25 @@ def _parse_services(services: etree.Element) -> pd.DataFrame:
                     "./txc:InboundDescription/txc:Description", None, NS
                 )
 
-                for jp in service.iterfind(
+                for pattern in service.iterfind(
                     "./txc:StandardService/txc:JourneyPattern", NS
                 ):
                     # Journey pattern id
-                    journey_pattern_id = jp.get("id")
+                    journey_pattern_id = pattern.get("id")
 
                     # Section reference
-                    section_ref = jp.findtext(
+                    section_ref = pattern.findtext(
                         "./txc:JourneyPatternSectionRefs", None, NS
                     )
 
                     # Direction
-                    direction = jp.findtext("./txc:Direction", None, NS)
+                    direction = pattern.findtext("./txc:Direction", None, NS)
                     assert direction
 
                     # Headsign
                     headsign = origin if direction == 0 else destination
                     # Route Reference
-                    route_ref = jp.findtext("txc:RouteRef", None, NS)
+                    route_ref = pattern.findtext("txc:RouteRef", None, NS)
 
                     yield {
                         "service_code": service_code,
@@ -322,20 +387,30 @@ def _parse_services(services: etree.Element) -> pd.DataFrame:
                         "end_date": end_date,
                     }
 
+                    pattern.clear()
+
+                line.clear()
+
+            service.clear()
+
     df = pd.DataFrame(generate_rows())
     df.set_index(["service_code", "line_id", "journey_pattern_id"], inplace=True)
-    return df
+    return {"services": df}
 
 
+@_register_parser("RouteSections")
 def _parse_route_sections(
     route_sections: etree.Element,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> _ParseResult:
     def generate_route_link_rows():
-        for route_section in route_sections.findall("./txc:RouteSection", NS):
+        route_section_qname = etree.QName(NS["txc"], "RouteSection")
+        route_link_qname = etree.QName(NS["txc"], "RouteLink")
+
+        for route_section in route_sections.iterchildren(route_section_qname):
             id = route_section.get("id")
             assert id
             for link_seq_num, link in enumerate(
-                route_section.findall("./txc:RouteLink", NS)
+                route_section.iterchildren(route_link_qname)
             ):
                 link_id = link.get("id")
                 assert link_id
@@ -355,14 +430,14 @@ def _parse_route_sections(
                     "route_link_distance": int(distance),
                 }
 
-    route_link_df = pd.DataFrame(generate_route_link_rows())
-    route_link_df.set_index(["route_section_id", "route_link_id"], inplace=True)
+    route_sections_df = pd.DataFrame(generate_route_link_rows())
+    route_sections_df.set_index(["route_section_id", "route_link_id"], inplace=True)
 
     def generate_route_track_rows():
-        for link in route_sections.findall("./txc:RouteSection/txc:RouteLink", NS):
+        for link in route_sections.iterfind("./txc:RouteSection/txc:RouteLink", NS):
             link_id = link.get("id")
             for loc_seq_num, loc in enumerate(
-                link.findall("./txc:Track/txc:Mapping/txc:Location", NS)
+                link.iterfind("./txc:Track/txc:Mapping/txc:Location", NS)
             ):
                 loc_id = loc.get("id")
                 assert loc_id
@@ -379,10 +454,37 @@ def _parse_route_sections(
                     "longitude": Decimal(loc_lon),
                 }
 
+                loc.clear()
+
+            loc.clear()
+
     route_locations_df = pd.DataFrame(generate_route_track_rows())
     route_locations_df.set_index(["route_link_id", "location_id"], inplace=True)
 
-    return route_link_df, route_locations_df
+    return {"route_sections": route_sections_df, "route_locations": route_locations_df}
+
+
+@_register_parser("TransXChange")
+def _parse_metadata(elem: etree.Element) -> _ParseResult:
+    filename = elem.get("FileName")
+    creation_date = elem.get("CreationDateTime")
+    if creation_date is not None:
+        creation_date = datetime.fromisoformat(creation_date)
+    modification_date = elem.get("ModificationDateTime")
+    if modification_date is not None:
+        modification_date = datetime.fromisoformat(modification_date)
+    revision_num = elem.get("RevisionNumber")
+    if revision_num is not None:
+        revision_num = int(revision_num)
+
+    return {
+        "metadata": TransXChangeMeta(
+            filename=filename,
+            creation_date=creation_date,
+            modification_date=modification_date,
+            revision_num=revision_num,
+        )
+    }
 
 
 def parse_transxchange_file(path: Path) -> TransXChange:
@@ -404,85 +506,21 @@ def parse_transxchange_file(path: Path) -> TransXChange:
           direction_id, trip_shortname)
         - Routes: <route_id>, agency_id, route_type, route_short_name, route_long_name
     """
-    journey_pattern_sections: pd.DataFrame | None = None
-    vehicle_journeys: pd.DataFrame | None = None
-    services: pd.DataFrame | None = None
-    routes: pd.DataFrame | None = None
-    stop_points: pd.DataFrame | None = None
-    operators: pd.DataFrame | None = None
-    route_sections: pd.DataFrame | None = None
-    route_locations: pd.DataFrame | None = None
-
-    # Metadata
-    filename: str | None = None
-    creation_date: datetime | None = None
-    modification_date: datetime | None = None
-    revision_num: int | None = None
+    parsers = _PARSERS
+    kwargs: _ParseResult = {}
 
     for _, elem in etree.iterparse(
         path,
-        events=("end",),
+        ("end",),
+        tag=[etree.QName(NS["txc"], tag) for tag in parsers.keys()],
         remove_blank_text=True,
         remove_comments=True,
         remove_pis=True,
     ):
         tag = etree.QName(cast(str, elem.tag)).localname
-        match tag:
-            case "JourneyPatternSections":
-                assert journey_pattern_sections is None
-                journey_pattern_sections = _parse_service_journey_pattern_sections(elem)
-
-            case "Routes":
-                assert routes is None
-                routes = _parse_routes(elem)
-
-            case "StopPoints":
-                assert stop_points is None
-                stop_points = _parse_stop_points(elem)
-
-            case "VehicleJourneys":
-                assert vehicle_journeys is None
-                vehicle_journeys = _parse_vehicle_journeys(elem)
-
-            case "Services":
-                assert services is None
-                services = _parse_services(elem)
-
-            case "Operators":
-                assert operators is None
-                operators = _parse_operators(elem)
-
-            case "RouteSections":
-                assert route_sections is None
-                route_sections, route_locations = _parse_route_sections(elem)
-
-            case "TransXChange":
-                filename = elem.get("FileName")
-                if date := elem.get("CreationDateTime"):
-                    creation_date = datetime.fromisoformat(date)
-                if date := elem.get("ModificationDateTime"):
-                    modification_date = datetime.fromisoformat(date)
-                if num := elem.get("RevisionNumber"):
-                    revision_num = int(num)
-
-            case _:
-                continue
-
+        kwargs.update(parsers[tag](elem))
         elem.clear()
 
-    return TransXChange(
-        journey_pattern_sections=journey_pattern_sections,
-        vehicle_journeys=vehicle_journeys,
-        services=services,
-        routes=routes,
-        stop_points=stop_points,
-        operators=operators,
-        route_sections=route_sections,
-        route_locations=route_locations,
-        metadata=TransXChangeMeta(
-            filename=filename,
-            creation_date=creation_date,
-            modification_date=modification_date,
-            revision_num=revision_num,
-        ),
-    )
+    assert "metadata" in kwargs
+
+    return TransXChange(**kwargs)
