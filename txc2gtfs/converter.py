@@ -72,7 +72,7 @@ def parse_txc_to_sql_conn(path: Path, conn: sqlite3.Connection) -> None:
     txc = parse_transxchange_file(path)
 
     # Parse stop_times
-    stop_times = get_stop_times(txc.gtfs_info)
+    stop_times = get_stop_times(txc)
 
     # Parse trips
     trips = get_trips(txc.gtfs_info)

@@ -64,14 +64,11 @@ def get_calendar(gtfs_info: pd.DataFrame) -> pd.DataFrame:
     )
 
     # Fix column order
-    return cast(
-        pd.DataFrame,
-        calendar[
-            [
-                "service_id",
-                *_DAYS_OF_THE_WEEK,
-                "start_date",
-                "end_date",
-            ]
-        ],
-    )
+    return calendar[
+        [
+            "service_id",
+            *_DAYS_OF_THE_WEEK,
+            "start_date",
+            "end_date",
+        ]
+    ]

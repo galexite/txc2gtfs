@@ -16,7 +16,6 @@ def test_txc21_data():
 def test_reading_stops_from_txc21(test_txc21_data):
     import untangle
     from pandas import DataFrame
-
     from txc2gtfs.stops import _get_txc_21_style_stops
 
     data = untangle.parse(test_txc21_data)
@@ -41,7 +40,6 @@ def test_reading_stops_from_txc21(test_txc21_data):
 def test_reading_stops_from_tfl(test_tfl_data):
     import untangle
     from pandas import DataFrame
-
     from txc2gtfs.stops import _get_tfl_style_stops
 
     data = untangle.parse(test_tfl_data)

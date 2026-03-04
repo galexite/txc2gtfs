@@ -24,9 +24,8 @@ def dir_with_packed_data():
 
 
 def test_reading_from_unpacked_directory(unpacked_data):
-    from untangle import Element
-
     from txc2gtfs.dataio import get_xml_paths, read_unpacked_xml
+    from untangle import Element
 
     xml_paths = get_xml_paths(unpacked_data)
 
@@ -36,15 +35,14 @@ def test_reading_from_unpacked_directory(unpacked_data):
         assert path.endswith(".xml")
 
         # Test reading into untangle object
-        data, filesize, name = read_unpacked_xml(path)
+        data, _filesize, _name = read_unpacked_xml(path)
         assert isinstance(data, Element)
         assert "TransXChange" in data.__dir__()
 
 
 def test_reading_from_packed(packed_data):
-    from untangle import Element
-
     from txc2gtfs.dataio import get_xml_paths, read_xml_inside_zip
+    from untangle import Element
 
     xml_paths = get_xml_paths(packed_data)
 
@@ -60,15 +58,14 @@ def test_reading_from_packed(packed_data):
         assert v.endswith(".zip")
 
         # Test reading into untangle object
-        data, filesize, name = read_xml_inside_zip(path)
+        data, _filesize, _name = read_xml_inside_zip(path)
         assert isinstance(data, Element)
         assert "TransXChange" in data.__dir__()
 
 
 def test_reading_from_nested(nested_data):
-    from untangle import Element
-
     from txc2gtfs.dataio import get_xml_paths, read_xml_inside_nested_zip
+    from untangle import Element
 
     xml_paths = get_xml_paths(nested_data)
 
@@ -84,6 +81,6 @@ def test_reading_from_nested(nested_data):
         assert isinstance(v, dict)
 
         # Test reading into untangle object
-        data, filesize, name = read_xml_inside_nested_zip(path)
+        data, _filesize, _name = read_xml_inside_nested_zip(path)
         assert isinstance(data, Element)
         assert "TransXChange" in data.__dir__()

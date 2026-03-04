@@ -1,7 +1,8 @@
 import dataclasses
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict, cast
@@ -10,9 +11,7 @@ import pandas as pd
 from lxml import etree
 
 from txc2gtfs.calendar import _parse_service_operation_days
-from txc2gtfs.calendar_dates import (
-    _parse_service_non_operation_days,
-)
+from txc2gtfs.calendar_dates import _parse_service_non_operation_days
 from txc2gtfs.util.xml import NS
 
 
@@ -33,6 +32,7 @@ class TransXChangeMeta:
 class TransXChange:
     metadata: TransXChangeMeta
     journey_pattern_sections: pd.DataFrame | None = None
+    journey_timing_links: pd.DataFrame | None = None
     vehicle_journeys: pd.DataFrame | None = None
     services: pd.DataFrame | None = None
     routes: pd.DataFrame | None = None
@@ -50,6 +50,7 @@ class _ParseResult(TypedDict):
 
     metadata: NotRequired[TransXChangeMeta]
     journey_pattern_sections: NotRequired[pd.DataFrame]
+    journey_timing_links: NotRequired[pd.DataFrame]
     vehicle_journeys: NotRequired[pd.DataFrame]
     services: NotRequired[pd.DataFrame]
     routes: NotRequired[pd.DataFrame]
@@ -159,6 +160,65 @@ def _parse_service_mode(service: etree.Element) -> int:
             return 4
 
     return 3  # default to bus
+
+
+@_register_parser("VehicleJourney")
+def _parse_timing_links(
+    journey: etree.Element, metadata: TransXChangeMeta
+) -> _ParseResult:
+    def generate_rows():
+        timing_link_qname = etree.QName(NS["txc"], "VehicleJourneyTimingLink")
+        runtime_pat = re.compile(r"PT(?:(?P<h>\d+)H)?(?P<m>\d+)M(?P<s>\d+)S")
+
+        service_ref = journey.findtext("txc:ServiceRef", None, NS)
+        assert service_ref
+        # Get line reference
+        line_ref = journey.findtext("txc:LineRef", None, NS)
+        assert line_ref
+
+        vehicle_journey_id = journey.findtext("txc:VehicleJourneyCode", None, NS)
+        assert vehicle_journey_id
+
+        for timing_link in journey.iterchildren(timing_link_qname):
+            vehicle_journey_timing_link_id = timing_link.get("id")
+            assert vehicle_journey_timing_link_id
+
+            journey_pattern_timing_link_id = timing_link.findtext(
+                "txc:JourneyPatternTimingLinkRef", None, NS
+            )
+            assert journey_pattern_timing_link_id
+
+            if runtime := timing_link.findtext("txc:RunTime", None, NS):
+                runtime_match = runtime_pat.match(runtime)
+                assert runtime_match
+                h, m, s = runtime_match.group("h", "m", "s")
+
+                runtime_duration = timedelta(
+                    hours=int(h or 0), minutes=int(m), seconds=int(s)
+                )
+            else:
+                runtime_duration = timedelta()
+
+            yield {
+                "service_ref": service_ref,
+                "line_ref": line_ref,
+                "vehicle_journey_id": vehicle_journey_id,
+                "vehicle_journey_timing_link_id": vehicle_journey_timing_link_id,
+                "journey_pattern_timing_link_id": journey_pattern_timing_link_id,
+                "runtime": runtime_duration,
+            }
+
+    df = pd.DataFrame(generate_rows())
+    df.set_index(
+        [
+            "service_ref",
+            "line_ref",
+            "vehicle_journey_id",
+            "vehicle_journey_timing_link_id",
+        ],
+        inplace=True,
+    )
+    return {"journey_timing_links": df}
 
 
 @_register_parser("VehicleJourneys")
@@ -546,7 +606,6 @@ def parse_transxchange_file(path: Path) -> TransXChange:
 
         assert metadata is not None
         kwargs.update(parsers[tag](elem, metadata))
-        elem.clear()
 
     assert "metadata" in kwargs
 
