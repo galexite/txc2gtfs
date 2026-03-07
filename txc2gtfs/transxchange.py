@@ -161,73 +161,12 @@ def _parse_service_mode(service: etree.Element) -> int:
 
     return 3  # default to bus
 
-
-@_register_parser("VehicleJourney")
-def _parse_timing_links(
-    journey: etree.Element, metadata: TransXChangeMeta
-) -> _ParseResult:
-    def generate_rows():
-        timing_link_qname = etree.QName(NS["txc"], "VehicleJourneyTimingLink")
-        runtime_pat = re.compile(r"PT(?:(?P<h>\d+)H)?(?P<m>\d+)M(?P<s>\d+)S")
-
-        service_ref = journey.findtext("txc:ServiceRef", None, NS)
-        assert service_ref
-        # Get line reference
-        line_ref = journey.findtext("txc:LineRef", None, NS)
-        assert line_ref
-
-        vehicle_journey_id = journey.findtext("txc:VehicleJourneyCode", None, NS)
-        assert vehicle_journey_id
-
-        for timing_link in journey.iterchildren(timing_link_qname):
-            vehicle_journey_timing_link_id = timing_link.get("id")
-            assert vehicle_journey_timing_link_id
-
-            journey_pattern_timing_link_id = timing_link.findtext(
-                "txc:JourneyPatternTimingLinkRef", None, NS
-            )
-            assert journey_pattern_timing_link_id
-
-            if runtime := timing_link.findtext("txc:RunTime", None, NS):
-                runtime_match = runtime_pat.match(runtime)
-                assert runtime_match
-                h, m, s = runtime_match.group("h", "m", "s")
-
-                runtime_duration = timedelta(
-                    hours=int(h or 0), minutes=int(m), seconds=int(s)
-                )
-            else:
-                runtime_duration = timedelta()
-
-            yield {
-                "service_ref": service_ref,
-                "line_ref": line_ref,
-                "vehicle_journey_id": vehicle_journey_id,
-                "vehicle_journey_timing_link_id": vehicle_journey_timing_link_id,
-                "journey_pattern_timing_link_id": journey_pattern_timing_link_id,
-                "runtime": runtime_duration,
-            }
-
-    df = pd.DataFrame(generate_rows())
-    df.set_index(
-        [
-            "service_ref",
-            "line_ref",
-            "vehicle_journey_id",
-            "vehicle_journey_timing_link_id",
-        ],
-        inplace=True,
-    )
-    return {"journey_timing_links": df}
-
-
 @_register_parser("VehicleJourneys")
 def _parse_vehicle_journeys(
     journeys: etree.Element, metadata: TransXChangeMeta
 ) -> _ParseResult:
-    def generate_rows():
-        journey_qname = etree.QName(NS["txc"], "VehicleJourney")
-
+    journey_qname = etree.QName(NS["txc"], "VehicleJourney")
+    def generate_vehicle_journey_rows():
         for journey in journeys.iterchildren(journey_qname):
             service_ref = journey.findtext("txc:ServiceRef", None, NS)
             # Get line reference
@@ -262,11 +201,62 @@ def _parse_vehicle_journeys(
                 "departure_time": departure_time,
             }
 
-            journey.clear()
+    journeys_df = pd.DataFrame(generate_vehicle_journey_rows())
+    journeys_df.set_index(["service_ref", "line_ref", "vehicle_journey_id"], inplace=True)
 
-    df = pd.DataFrame(generate_rows())
-    df.set_index(["service_ref", "line_ref", "vehicle_journey_id"], inplace=True)
-    return {"vehicle_journeys": df}
+    def generate_timing_link_rows():
+        for journey in journeys.iterchildren(journey_qname):
+            service_ref = journey.findtext("txc:ServiceRef", None, NS)
+            assert service_ref
+            # Get line reference
+            line_ref = journey.findtext("txc:LineRef", None, NS)
+            assert line_ref
+
+            vehicle_journey_id = journey.findtext("txc:VehicleJourneyCode", None, NS)
+            assert vehicle_journey_id
+
+            timing_link_qname = etree.QName(NS["txc"], "VehicleJourneyTimingLink")
+            runtime_pat = re.compile(r"PT(?:(?P<h>\d+)H)?(?P<m>\d+)M(?P<s>\d+)S")
+            for timing_link in journey.iterchildren(timing_link_qname):
+                vehicle_journey_timing_link_id = timing_link.get("id")
+                assert vehicle_journey_timing_link_id
+
+                journey_pattern_timing_link_id = timing_link.findtext(
+                    "txc:JourneyPatternTimingLinkRef", None, NS
+                )
+                assert journey_pattern_timing_link_id
+
+                if runtime := timing_link.findtext("txc:RunTime", None, NS):
+                    runtime_match = runtime_pat.match(runtime)
+                    assert runtime_match
+                    h, m, s = runtime_match.group("h", "m", "s")
+
+                    runtime_duration = timedelta(
+                        hours=int(h or 0), minutes=int(m), seconds=int(s)
+                    )
+                else:
+                    runtime_duration = timedelta()
+
+                yield {
+                    "service_ref": service_ref,
+                    "line_ref": line_ref,
+                    "vehicle_journey_id": vehicle_journey_id,
+                    "vehicle_journey_timing_link_id": vehicle_journey_timing_link_id,
+                    "journey_pattern_timing_link_id": journey_pattern_timing_link_id,
+                    "runtime": runtime_duration,
+                }
+
+    timing_links_df = pd.DataFrame(generate_timing_link_rows())
+    timing_links_df.set_index(
+        [
+            "service_ref",
+            "line_ref",
+            "vehicle_journey_id",
+            "vehicle_journey_timing_link_id",
+        ],
+        inplace=True,
+    )
+    return {"journey_timing_links": timing_links_df, "vehicle_journeys": journeys_df}
 
 
 @_register_parser("Routes")
@@ -349,25 +339,6 @@ def _parse_operators(
     df = pd.DataFrame(generate_rows())
     df.set_index("agency_id", inplace=True)
     return {"operators": df}
-
-
-def _parse_runtime_duration(runtime: str) -> int:
-    """Parse duration information from TransXChange runtime code"""
-    time = 0
-    runtime = runtime.split("PT", maxsplit=1)[-1]
-
-    if "H" in runtime:
-        split = runtime.split("H", maxsplit=1)
-        time = time + int(split[0]) * 60 * 60
-        runtime = split[1]
-    if "M" in runtime:
-        split = runtime.split("M", maxsplit=1)
-        time = time + int(split[0]) * 60
-        runtime = split[1]
-    if "S" in runtime:
-        split = runtime.split("S", maxsplit=1)
-        time = time + int(split[0])
-    return time
 
 
 def _parse_direction(direction: str) -> Literal[0] | Literal[1]:
