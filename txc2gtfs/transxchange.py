@@ -2,7 +2,7 @@ import dataclasses
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict, cast
@@ -139,9 +139,6 @@ def _parse_journey_pattern_sections(
             section.clear()
 
     df = pd.DataFrame(generate_rows())
-    df.set_index(
-        ["journey_pattern_section_id", "journey_pattern_timing_link_id"], inplace=True
-    )
     return {"journey_pattern_sections": df}
 
 
@@ -190,6 +187,7 @@ def _parse_vehicle_journeys(
 
             departure_time = journey.findtext("txc:DepartureTime", None, NS)
             assert departure_time
+            departure_time = time.fromisoformat(departure_time)
 
             yield {
                 "service_ref": service_ref,
@@ -202,7 +200,6 @@ def _parse_vehicle_journeys(
             }
 
     journeys_df = pd.DataFrame(generate_vehicle_journey_rows())
-    journeys_df.set_index(["service_ref", "line_ref", "vehicle_journey_id"], inplace=True)
 
     def generate_timing_link_rows():
         for journey in journeys.iterchildren(journey_qname):
@@ -247,15 +244,6 @@ def _parse_vehicle_journeys(
                 }
 
     timing_links_df = pd.DataFrame(generate_timing_link_rows())
-    timing_links_df.set_index(
-        [
-            "service_ref",
-            "line_ref",
-            "vehicle_journey_id",
-            "vehicle_journey_timing_link_id",
-        ],
-        inplace=True,
-    )
     return {"journey_timing_links": timing_links_df, "vehicle_journeys": journeys_df}
 
 
@@ -288,7 +276,6 @@ def _parse_routes(routes: etree.Element, metadata: TransXChangeMeta) -> _ParseRe
             route.clear()
 
     df = pd.DataFrame(generate_rows())
-    df.set_index("route_id", inplace=True)
     return {"routes": df}
 
 
@@ -313,7 +300,6 @@ def _parse_stop_points(
             point.clear()
 
     df = pd.DataFrame(generate_rows())
-    df.set_index("stop_id", inplace=True)
     return {"stop_points": df}
 
 
@@ -337,7 +323,6 @@ def _parse_operators(
             operator.clear()
 
     df = pd.DataFrame(generate_rows())
-    df.set_index("agency_id", inplace=True)
     return {"operators": df}
 
 
@@ -441,7 +426,6 @@ def _parse_services(
             service.clear()
 
     df = pd.DataFrame(generate_rows())
-    df.set_index(["service_code", "line_id", "journey_pattern_id"], inplace=True)
     return {"services": df}
 
 
@@ -478,7 +462,6 @@ def _parse_route_sections(
                 }
 
     route_sections_df = pd.DataFrame(generate_route_link_rows())
-    route_sections_df.set_index(["route_section_id", "route_link_id"], inplace=True)
 
     def generate_route_track_rows():
         for link in route_sections.iterfind("./txc:RouteSection/txc:RouteLink", NS):
@@ -506,7 +489,6 @@ def _parse_route_sections(
             loc.clear()
 
     route_locations_df = pd.DataFrame(generate_route_track_rows())
-    route_locations_df.set_index(["route_link_id", "location_id"], inplace=True)
 
     return {"route_sections": route_sections_df, "route_locations": route_locations_df}
 
@@ -577,6 +559,8 @@ def parse_transxchange_file(path: Path) -> TransXChange:
 
         assert metadata is not None
         kwargs.update(parsers[tag](elem, metadata))
+
+        elem.clear()
 
     assert "metadata" in kwargs
 

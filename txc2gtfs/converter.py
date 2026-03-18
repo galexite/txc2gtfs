@@ -49,27 +49,40 @@ MIT.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
+from duckdb import DuckDBPyConnection
 from collections.abc import Generator, Iterable
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
+import dataclasses
+import pandas as pd
 
 from .calendar import get_calendar
 from .calendar_dates import get_calendar_dates
 from .gtfs import export_to_zip
 from .stop_times import get_stop_times
-from .transxchange import parse_transxchange_file
+from .transxchange import TransXChange, parse_transxchange_file
 from .trips import get_trips
 
 if TYPE_CHECKING:
     from _typeshed import StrPath
 
 
-def parse_txc_to_sql_conn(path: Path, conn: sqlite3.Connection) -> None:
+
+def _register_with_duckdb(txc: TransXChange, conn: DuckDBPyConnection) -> None:
+    for field in dataclasses.fields(txc):
+        if field.name == "metadata":
+            continue
+        conn.register(field.name, getattr(txc, field.name))
+
+
+def parse_txc_to_sql_conn(path: Path, conn: DuckDBPyConnection) -> None:
     # Parse GTFS info containing data about trips, calendar, stop_times and
     # calendar_dates
     txc = parse_transxchange_file(path)
+
+    _register_with_duckdb(txc, conn)
 
     # Parse stop_times
     stop_times = get_stop_times(txc)
@@ -143,8 +156,7 @@ def convert(
         out_gtfs_db.unlink(missing_ok=True)
 
     def do_parse_txc_to_sql(txc_file: Path) -> None:
-        with sqlite3.connect(out_gtfs_db) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
+        with duckdb.connect() as conn:
             parse_txc_to_sql_conn(txc_file, conn)
 
     # Create workers
