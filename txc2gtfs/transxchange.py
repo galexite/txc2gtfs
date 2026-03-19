@@ -10,9 +10,8 @@ from typing import Literal, NotRequired, TypedDict, cast
 import pandas as pd
 from lxml import etree
 
-from txc2gtfs.calendar import _parse_service_operation_days
-from txc2gtfs.calendar_dates import _parse_service_non_operation_days
-from txc2gtfs.util.xml import NS
+from .calendar_dates import _parse_service_non_operation_days
+from .util.xml import NS
 
 
 @dataclass(slots=True, frozen=True)
@@ -158,11 +157,31 @@ def _parse_service_mode(service: etree.Element) -> int:
 
     return 3  # default to bus
 
+
+def _parse_service_operation_days(data: etree.Element) -> str | None:
+    """
+    Get operating profile information from Services.Service.
+
+    This is used if VehicleJourney does not contain the information.
+    """
+
+    weekdays = data.findall(
+        "./txc:OperatingProfile/txc:RegularDayType/txc:DaysOfWeek/*", NS
+    )
+    if not weekdays:
+        return None
+
+    return "|".join(
+        cast(str, weekday.tag).rsplit("}", maxsplit=1)[1] for weekday in weekdays
+    )
+
+
 @_register_parser("VehicleJourneys")
 def _parse_vehicle_journeys(
     journeys: etree.Element, metadata: TransXChangeMeta
 ) -> _ParseResult:
     journey_qname = etree.QName(NS["txc"], "VehicleJourney")
+
     def generate_vehicle_journey_rows():
         for journey in journeys.iterchildren(journey_qname):
             service_ref = journey.findtext("txc:ServiceRef", None, NS)

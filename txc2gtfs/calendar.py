@@ -1,74 +1,45 @@
-from typing import cast
+import textwrap
 
-import pandas as pd
-from lxml import etree
-
-from txc2gtfs.util.xml import NS
-
-_DAYS_OF_THE_WEEK = [
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday",
-    "sunday",
-]
+from duckdb import DuckDBPyConnection
 
 
-def _parse_service_operation_days(data: etree.Element) -> str | None:
-    """
-    Get operating profile information from Services.Service.
+def get_calendar(conn: DuckDBPyConnection) -> None:
+    conn.execute(
+        textwrap.dedent("""
+    CREATE OR REPLACE TABLE calendar (
+        service_id VARCHAR,
+        monday BOOLEAN,
+        tuesday BOOLEAN,
+        wednesday BOOLEAN,
+        thursday BOOLEAN,
+        friday BOOLEAN,
+        saturday BOOLEAN,
+        sunday BOOLEAN,
+        start_date DATE,
+        end_date DATE
+    );
 
-    This is used if VehicleJourney does not contain the information.
-    """
-
-    weekdays = data.findall(
-        "./txc:OperatingProfile/txc:RegularDayType/txc:DaysOfWeek/*", NS
+    INSERT INTO calendar
+    SELECT
+        service_id,
+        'monday' IN operation_days AS monday,
+        'tuesday' IN operation_days AS tuesday,
+        'wednesday' IN operation_days AS wednesday,
+        'thursday' IN operation_days AS thursday,
+        'friday' IN operation_days AS friday,
+        'saturday' IN operation_days OR 'weekend' IN operation_days AS saturday,
+        'sunday' IN operation_days OR 'weekend' IN operation_days AS sunday,
+        start_date,
+        end_date
+    FROM (
+        SELECT
+            s.service_code AS service_id,
+            lower(vj.operation_days) AS operation_days,
+            s.start_date AS start_date,
+            s.end_date AS end_date
+        FROM services s
+        JOIN vehicle_journeys vj
+        ON s.service_code = vj.service_ref
     )
-    if not weekdays:
-        return None
-
-    return "|".join(
-        cast(str, weekday.tag).rsplit("}", maxsplit=1)[1] for weekday in weekdays
+    """)
     )
-
-
-def parse_day_range(row: pd.Series) -> pd.Series:
-    """Parse day range from TransXChange DayOfWeek element"""
-
-    dayinfo = cast(str, row["weekdays"]).lower()
-    row = pd.concat([row, pd.Series({day: 0 for day in _DAYS_OF_THE_WEEK})])
-
-    # Check if dayinfo is specified as day-range
-    if "to" in dayinfo:
-        start, end = dayinfo.split("to")
-        row.loc[start:end] = 1
-        return row
-
-    if dayinfo == "weekend":
-        row[["saturday", "sunday"]] = 1
-    else:
-        row[dayinfo.split("|")] = 1
-    return row.drop("weekdays")
-
-
-def get_calendar(gtfs_info: pd.DataFrame) -> pd.DataFrame:
-    """Parse calendar attributes from GTFS info DataFrame"""
-    # Parse calendar
-    calendar = (
-        gtfs_info[["service_id", "weekdays", "start_date", "end_date"]]
-        .drop_duplicates()
-        .reset_index(drop=True)
-        .apply(parse_day_range, axis=1)
-    )
-
-    # Fix column order
-    return calendar[
-        [
-            "service_id",
-            *_DAYS_OF_THE_WEEK,
-            "start_date",
-            "end_date",
-        ]
-    ]

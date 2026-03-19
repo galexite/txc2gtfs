@@ -1,13 +1,11 @@
 import textwrap
-from typing import cast
 
-import pandas as pd
 from duckdb import DuckDBPyConnection
 
 
-def get_stop_times(conn: DuckDBPyConnection) -> pd.DataFrame:
-    """Extract stop_times attributes from GTFS info DataFrame"""
-    conn.execute(textwrap.dedent("""
+def get_stop_times(conn: DuckDBPyConnection) -> None:
+    conn.execute(
+        textwrap.dedent("""
     CREATE TYPE pickup_dropoff_type AS ENUM (
         'regular', 'not_available', 'agency_request', 'driver_request'
     );
@@ -29,9 +27,17 @@ def get_stop_times(conn: DuckDBPyConnection) -> pd.DataFrame:
 
     INSERT INTO stop_times
     SELECT
-        concat(service_ref, ':', vehicle_journey_id) AS trip_id,
-        departure_time + running_arrival_time AS arrival_time,
-        departure_time + running_departure_time AS departure_time,
+        concat(service_ref, ':', journey_pattern_id) AS trip_id,
+        departure_time + (COALESCE(SUM(epoch(runtime)) OVER (
+            PARTITION BY journey_pattern_id
+            ORDER BY stop_sequence ASC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+        ), 0)::BIGINT * INTERVAL '1 second') AS arrival_time,
+        departure_time + (COALESCE(SUM(epoch(runtime)) OVER (
+            PARTITION BY journey_pattern_id
+            ORDER BY stop_sequence ASC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+        ), 0)::BIGINT * INTERVAL '1 second') AS departure_time,
         stop_id,
         stop_sequence,
         CASE WHEN activity IN ('pickUp', 'pickUpAndSetDown')
@@ -42,10 +48,28 @@ def get_stop_times(conn: DuckDBPyConnection) -> pd.DataFrame:
             THEN 'regular'::pickup_dropoff_type
             ELSE 'not_available'::pickup_dropoff_type
         END AS dropoff_type,
-        CASE WHEN timing_point_status = 'principleTimingPoint'
+        CASE WHEN timing_point_status = 'principalTimingPoint'
             THEN 'exact'::timepoint_type
             ELSE 'approximate'::timepoint_type
         END AS timepoint_type
-    FROM
-        -- TODO
-    """))
+    FROM (
+        SELECT
+            vj.service_ref,
+            vj.journey_pattern_id,
+            vj.departure_time,
+            jtl.runtime,
+            jps.stop_id,
+            jps.activity,
+            jps.timing_point_status,
+            ROW_NUMBER() OVER (
+                PARTITION BY vj.journey_pattern_id
+                ORDER BY jtl.vehicle_journey_timing_link_id
+            ) AS stop_sequence
+        FROM vehicle_journeys vj
+        JOIN journey_timing_links jtl
+            ON vj.vehicle_journey_id = jtl.vehicle_journey_id
+        JOIN journey_pattern_sections jps
+            ON jtl.journey_pattern_timing_link_id = jps.journey_pattern_timing_link_id
+    )
+    """)
+    )

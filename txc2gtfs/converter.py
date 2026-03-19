@@ -49,17 +49,17 @@ MIT.
 
 from __future__ import annotations
 
-import duckdb
-from duckdb import DuckDBPyConnection
+import dataclasses
+import textwrap
 from collections.abc import Generator, Iterable
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
-import dataclasses
-import pandas as pd
+
+import duckdb
+from duckdb import DuckDBPyConnection
 
 from .calendar import get_calendar
-from .calendar_dates import get_calendar_dates
 from .gtfs import export_to_zip
 from .stop_times import get_stop_times
 from .transxchange import TransXChange, parse_transxchange_file
@@ -69,12 +69,34 @@ if TYPE_CHECKING:
     from _typeshed import StrPath
 
 
-
 def _register_with_duckdb(txc: TransXChange, conn: DuckDBPyConnection) -> None:
     for field in dataclasses.fields(txc):
         if field.name == "metadata":
             continue
         conn.register(field.name, getattr(txc, field.name))
+
+
+def get_stops(conn: DuckDBPyConnection) -> None:
+    conn.execute(
+        textwrap.dedent("""
+    CREATE OR REPLACE TABLE stops (
+        stop_id VARCHAR PRIMARY KEY,
+        stop_name VARCHAR,
+        stop_lat DECIMAL(8, 6),
+        stop_lon DECIMAL(9, 6)
+    );
+
+    INSERT INTO stops
+    SELECT
+        s.stop_id,
+        s.stop_name,
+        naptan.Latitude,
+        naptan.Longitude
+    FROM stop_points s
+    JOIN (SELECT * FROM read_csv('Stops.csv', delim = ',', header = true)) naptan
+    ON s.stop_id = naptan.ATCOCode
+    """)
+    )
 
 
 def parse_txc_to_sql_conn(path: Path, conn: DuckDBPyConnection) -> None:
@@ -84,32 +106,12 @@ def parse_txc_to_sql_conn(path: Path, conn: DuckDBPyConnection) -> None:
 
     _register_with_duckdb(txc, conn)
 
-    # Parse stop_times
-    stop_times = get_stop_times(txc)
-
-    # Parse trips
-    trips = get_trips(txc.gtfs_info)
-
-    # Parse calendar
-    calendar = get_calendar(txc.gtfs_info)
-
-    # Parse calendar_dates
-    calendar_dates = get_calendar_dates(txc.gtfs_info)
-
-    if len(stop_times) > 0:
-        stop_times.to_sql(name="stop_times", con=conn, index=False, if_exists="append")
-        trips.to_sql(name="trips", con=conn, index=False, if_exists="append")
-        calendar.to_sql(name="calendar", con=conn, index=False, if_exists="append")
-
-        if calendar_dates is not None:
-            calendar_dates.to_sql(
-                name="calendar_dates", con=conn, index=False, if_exists="append"
-            )
-    else:
-        print(
-            f"UserWarning: File {path.name} did not contain valid stop_sequence "
-            "data, skipping."
-        )
+    get_stops(conn)
+    get_stop_times(conn)
+    get_trips(conn)
+    get_calendar(conn)
+    # get_calendar_dates(conn)
+    # get_routes(conn)
 
 
 def _iterate_paths(input: Iterable[StrPath]) -> Generator[Path, None, None]:

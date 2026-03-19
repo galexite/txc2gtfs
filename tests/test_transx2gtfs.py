@@ -30,6 +30,7 @@ def temp_output_filepath():
 
 def test_agency_urls():
     import requests
+
     from txc2gtfs.agency import get_agency_url
 
     operator_codes = [

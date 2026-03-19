@@ -1,19 +1,30 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
-
-if TYPE_CHECKING:
-    import pandas as pd
+from duckdb import DuckDBPyConnection
 
 
-def get_trips(gtfs_info: pd.DataFrame) -> pd.DataFrame:
-    """Extract trips attributes from GTFS info DataFrame"""
-    # Extract trips from GTFS info
-    return cast(
-        pd.DataFrame,
-        gtfs_info[
-            ["route_id", "service_id", "trip_id", "trip_headsign", "direction_id"]
-        ]
-        .drop_duplicates()
-        .reset_index(drop=True),
-    )
+def get_trips(conn: DuckDBPyConnection) -> None:
+    conn.execute("""
+    CREATE TYPE direction_id_type AS ENUM (
+        'outbound', 'inbound'
+    );
+
+    CREATE OR REPLACE TABLE trips (
+        trip_id VARCHAR PRIMARY KEY,
+        route_id VARCHAR,
+        service_id VARCHAR,
+        trip_headsign VARCHAR,
+        trip_short_name VARCHAR,
+        direction_id direction_id_type
+    );
+
+    INSERT INTO trips
+    SELECT
+        concat(service_code, ':', journey_pattern_id) AS trip_id,
+        route_id as route_id,
+        service_code as service_id,
+        trip_headsign,
+        description AS trip_short_name,
+        direction_id::direction_id_type
+    FROM services
+    """)
