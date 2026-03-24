@@ -37,8 +37,8 @@ def get_calendar(conn: DuckDBPyConnection) -> None:
             lower(vj.operation_days) AS operation_days,
             s.start_date AS start_date,
             s.end_date AS end_date
-        FROM services s
-        JOIN vehicle_journeys vj
+        FROM txc_services s
+        JOIN txc_vehicle_journeys vj
         ON s.service_code = vj.service_ref
     )
     """)

@@ -55,6 +55,8 @@ from collections.abc import Generator, Iterable
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
+from tempfile import TemporaryDirectory
+import os
 
 import duckdb
 from duckdb import DuckDBPyConnection
@@ -64,6 +66,7 @@ from .gtfs import export_to_zip
 from .stop_times import get_stop_times
 from .transxchange import TransXChange, parse_transxchange_file
 from .trips import get_trips
+from .util.network import download_cached
 
 if TYPE_CHECKING:
     from _typeshed import StrPath
@@ -73,7 +76,7 @@ def _register_with_duckdb(txc: TransXChange, conn: DuckDBPyConnection) -> None:
     for field in dataclasses.fields(txc):
         if field.name == "metadata":
             continue
-        conn.register(field.name, getattr(txc, field.name))
+        conn.register(f"txc_{field.name}", getattr(txc, field.name))
 
 
 def get_stops(conn: DuckDBPyConnection) -> None:
@@ -88,15 +91,40 @@ def get_stops(conn: DuckDBPyConnection) -> None:
 
     INSERT INTO stops
     SELECT
-        s.stop_id,
-        s.stop_name,
-        naptan.Latitude,
-        naptan.Longitude
-    FROM stop_points s
-    JOIN (SELECT * FROM read_csv('Stops.csv', delim = ',', header = true)) naptan
-    ON s.stop_id = naptan.ATCOCode
+        stop_id,
+        stop_name,
+        NULL as stop_lat,
+        NULL as stop_lon
+    FROM txc_stop_points
     """)
     )
+
+
+def get_routes(conn: DuckDBPyConnection) -> None:
+    conn.execute(textwrap.dedent("""
+    -- CREATE TYPE route_type_type AS ENUM (
+    --     'tram_streetcar_rail', 'subway_metro', 'rail', 'bus', 'ferry', 'cable_tram',
+    --     'aerial_lift', 'funicular'
+    -- );
+
+    CREATE OR REPLACE TABLE routes (
+        route_id VARCHAR PRIMARY KEY,
+        agency_id VARCHAR,
+        route_short_name VARCHAR,
+        route_long_name VARCHAR,
+        route_type INTEGER
+    );
+
+    INSERT INTO routes
+    SELECT DISTINCT
+        line_id AS route_id,
+        agency_id,
+        line_name as route_short_name,
+        description as route_long_name,
+        travel_mode AS route_type
+    FROM txc_services
+    WHERE direction_id = 'outbound'
+    """))
 
 
 def parse_txc_to_sql_conn(path: Path, conn: DuckDBPyConnection) -> None:
@@ -111,7 +139,8 @@ def parse_txc_to_sql_conn(path: Path, conn: DuckDBPyConnection) -> None:
     get_trips(conn)
     get_calendar(conn)
     # get_calendar_dates(conn)
-    # get_routes(conn)
+    get_routes(conn)
+    # get_agency(conn)
 
 
 def _iterate_paths(input: Iterable[StrPath]) -> Generator[Path, None, None]:
@@ -157,16 +186,31 @@ def convert(
     if not append_to_existing:
         out_gtfs_db.unlink(missing_ok=True)
 
-    def do_parse_txc_to_sql(txc_file: Path) -> None:
-        with duckdb.connect() as conn:
-            parse_txc_to_sql_conn(txc_file, conn)
+    with TemporaryDirectory(prefix="txc2gtfs-") as temp:
+        temp_path = Path(temp)
 
-    # Create workers
-    if num_workers > 1:
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            executor.map(do_parse_txc_to_sql, input)
-    else:
-        for txc_file in input:
-            do_parse_txc_to_sql(txc_file)
+        def do_parse_txc_to_sql(inp: tuple[int, Path]) -> None:
+            i, txc_file = inp
+            with duckdb.connect() as conn:
+                parse_txc_to_sql_conn(txc_file, conn)
 
-    export_to_zip(out_gtfs_db, output)
+                path = temp_path / f"worker-{i}"
+                path.mkdir()
+
+                conn.execute(textwrap.dedent("""
+                COPY stops TO concat($path, 'stops.csv')
+                COPY stop_times TO concat($path, 'stop_times.csv')
+                COPY trips TO concat($path, 'trips.csv')
+                COPY calendar TO concat($path, 'calendar.csv')
+                COPY routes TO concat($path, 'routes.csv')
+                """), {"path": f"{path}{os.path.sep}"})
+
+        # Create workers
+        if num_workers > 1:
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                executor.map(do_parse_txc_to_sql, enumerate(input))
+        else:
+            for txc_file in input:
+                do_parse_txc_to_sql((0, txc_file))
+
+        export_to_zip(out_gtfs_db, temp_path)

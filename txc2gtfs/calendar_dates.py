@@ -3,28 +3,8 @@ from collections.abc import Generator
 from typing import cast
 
 import pandas as pd
-from lxml import etree
 
-from txc2gtfs.bank_holidays import get_bank_holiday_dates
-from txc2gtfs.util.xml import NS
-
-
-def _parse_service_non_operation_days(data: etree.Element) -> str | None:
-    """
-    Get days of non-operation.
-    """
-
-    non_operation_days = data.findall(
-        "./txc:OperatingProfile/txc:BankHolidayOperation/txc:DaysOfNonOperation/*", NS
-    )
-    if not non_operation_days:
-        return None
-
-    return "|".join(
-        cast(str, weekday.tag).rsplit("}", maxsplit=1)[1]
-        for weekday in non_operation_days
-    )
-
+from .bank_holidays import get_bank_holiday_dates
 
 # Known exceptions and their counterparts in bankholiday table
 _KNOWN_HOLIDAYS = {
@@ -67,14 +47,11 @@ def get_calendar_dates(gtfs_info: pd.DataFrame) -> pd.DataFrame | None:
         return None
 
     # Check if there exists some exceptions that are not known bank holidays
-    unrecognized_holidays = cast(
-        pd.Series,
-        non_operative_days[
-            ~non_operative_days.isin(_KNOWN_HOLIDAYS)
-            & (non_operative_days != "AllBankHolidays")
-            & ~non_operative_days.str.endswith("Eve")
-        ],
-    )
+    unrecognized_holidays = non_operative_days[
+        ~non_operative_days.isin(_KNOWN_HOLIDAYS)
+        & (non_operative_days != "AllBankHolidays")
+        & ~non_operative_days.str.endswith("Eve")
+    ]
     if not unrecognized_holidays.empty:
         warnings.warn(
             f"Did not recognize holidays: {unrecognized_holidays.tolist()}",

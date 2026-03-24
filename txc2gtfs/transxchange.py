@@ -10,7 +10,6 @@ from typing import Literal, NotRequired, TypedDict, cast
 import pandas as pd
 from lxml import etree
 
-from .calendar_dates import _parse_service_non_operation_days
 from .util.xml import NS
 
 
@@ -158,16 +157,8 @@ def _parse_service_mode(service: etree.Element) -> int:
     return 3  # default to bus
 
 
-def _parse_service_operation_days(data: etree.Element) -> str | None:
-    """
-    Get operating profile information from Services.Service.
-
-    This is used if VehicleJourney does not contain the information.
-    """
-
-    weekdays = data.findall(
-        "./txc:OperatingProfile/txc:RegularDayType/txc:DaysOfWeek/*", NS
-    )
+def _parse_weekdays(data: etree.Element, xpath: str) -> str | None:
+    weekdays = data.findall(xpath, NS)
     if not weekdays:
         return None
 
@@ -199,10 +190,15 @@ def _parse_vehicle_journeys(
             assert vehicle_journey_id
 
             # Parse weekday operation times from VehicleJourney
-            operation_days = _parse_service_operation_days(journey)
+            operation_days = _parse_weekdays(
+                journey, "./txc:OperatingProfile/txc:RegularDayType/txc:DaysOfWeek/*"
+            )
 
             # Parse calendar dates (exceptions in operation)
-            non_operative_days = _parse_service_non_operation_days(journey)
+            non_operative_days = _parse_weekdays(
+                journey,
+                "./txc:OperatingProfile/txc:BankHolidayOperation/txc:DaysOfNonOperation/*",
+            )
 
             departure_time = journey.findtext("txc:DepartureTime", None, NS)
             assert departure_time

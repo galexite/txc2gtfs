@@ -21,10 +21,10 @@ def get_trips(conn: DuckDBPyConnection) -> None:
     INSERT INTO trips
     SELECT
         concat(service_code, ':', journey_pattern_id) AS trip_id,
-        route_id as route_id,
+        line_id as route_id,
         service_code as service_id,
         trip_headsign,
         description AS trip_short_name,
         direction_id::direction_id_type
-    FROM services
+    FROM txc_services
     """)

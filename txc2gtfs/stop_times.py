@@ -65,10 +65,10 @@ def get_stop_times(conn: DuckDBPyConnection) -> None:
                 PARTITION BY vj.journey_pattern_id
                 ORDER BY jtl.vehicle_journey_timing_link_id
             ) AS stop_sequence
-        FROM vehicle_journeys vj
-        JOIN journey_timing_links jtl
+        FROM txc_vehicle_journeys vj
+        JOIN txc_journey_timing_links jtl
             ON vj.vehicle_journey_id = jtl.vehicle_journey_id
-        JOIN journey_pattern_sections jps
+        JOIN txc_journey_pattern_sections jps
             ON jtl.journey_pattern_timing_link_id = jps.journey_pattern_timing_link_id
     )
     """)
