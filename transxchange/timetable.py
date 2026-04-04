@@ -1,10 +1,11 @@
-import dataclasses
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
+
+from .metadata import Metadata
 
 if TYPE_CHECKING:
     from _typeshed import StrPath
@@ -13,19 +14,6 @@ import pandas as pd
 from lxml import etree
 
 NS = {"txc": "http://www.transxchange.org.uk/"}
-
-
-@dataclass(slots=True, frozen=True)
-class Metadata:
-    filename: str
-    creation_date: datetime
-    modification_date: datetime | None
-    revision_num: int
-
-    dataset_id: str = dataclasses.field(init=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "dataset_id", f"{self.filename}#{self.revision_num}")
 
 
 class _ParseResult(TypedDict):
@@ -496,27 +484,6 @@ def _parse_route_sections(
     return {"route_sections": route_sections_df, "route_locations": route_locations_df}
 
 
-def _parse_metadata(elem: etree.Element) -> Metadata:
-    filename = elem.get("FileName")
-    assert filename is not None
-    creation_date = elem.get("CreationDateTime")
-    assert creation_date is not None
-    creation_date = datetime.fromisoformat(creation_date)
-    modification_date = elem.get("ModificationDateTime")
-    if modification_date is not None:
-        modification_date = datetime.fromisoformat(modification_date)
-    revision_num = elem.get("RevisionNumber")
-    assert revision_num is not None
-    revision_num = int(revision_num)
-
-    return Metadata(
-        filename=filename,
-        creation_date=creation_date,
-        modification_date=modification_date,
-        revision_num=revision_num,
-    )
-
-
 @dataclass(slots=True, frozen=True)
 class Timetable:
     metadata: Metadata
@@ -558,7 +525,7 @@ class Timetable:
             tag = etree.QName(cast(str, elem.tag)).localname
             if event == "start":
                 if tag == "TransXChange":
-                    metadata = _parse_metadata(elem)
+                    metadata = Metadata.from_xml_element(elem)
                     kwargs["metadata"] = metadata
                 continue
             elif tag == "TransXChange":

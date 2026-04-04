@@ -33,12 +33,12 @@ def get_stop_times(conn: DuckDBPyConnection) -> None:
         stop_id,
         stop_sequence,
         CASE WHEN activity IN ('pickUp', 'pickUpAndSetDown')
-            THEN 0
-            ELSE 1 -- 'not available'
+            THEN 0 -- regular
+            ELSE 1 -- not available
         END AS pickup_type,
         CASE WHEN activity IN ('setDown', 'pickUpAndSetDown')
-            THEN 0
-            ELSE 1 -- 'not available'
+            THEN 0 -- regular
+            ELSE 1 -- not available
         END AS dropoff_type,
         CASE WHEN timing_point_status = 'principalTimingPoint'
             THEN 1 -- exact
