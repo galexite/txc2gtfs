@@ -11,7 +11,7 @@ GTFS_FILES = [
 ]
 
 
-def export_to_zip(db: Path, output: Path, worker_output: Iterator[Path]) -> None:
+def export_to_zip(output: Path, worker_output: Iterator[Path]) -> None:
     """Reads the gtfs database and generates an export dictionary for GTFS"""
     with ZipFile(output, "w", compression=ZIP_DEFLATED) as zf:
         files = [(f"{f[:-3]}.csv", zf.open(f, "w")) for f in GTFS_FILES]

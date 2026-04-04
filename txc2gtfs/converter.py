@@ -178,15 +178,6 @@ def convert(
         CPUs is used.
     """
     input = _iterate_paths(input)
-    output = Path(output)
-
-    # Filepath for temporary gtfs db
-    out_gtfs_db = output.parent / "gtfs.db"
-
-    # If append to database is false remove previous gtfs-database if it exists
-    if not append_to_existing:
-        out_gtfs_db.unlink(missing_ok=True)
-
     with TemporaryDirectory(prefix="txc2gtfs-") as temp:
         temp_path = Path(temp)
 
@@ -218,4 +209,4 @@ def convert(
         else:
             worker_output = (do_parse_txc_to_sql((0, txc_file)) for txc_file in input)
 
-        export_to_zip(out_gtfs_db, output, worker_output)
+        export_to_zip(Path(output), worker_output)
