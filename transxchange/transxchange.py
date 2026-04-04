@@ -532,23 +532,13 @@ class TransXChange:
 
     @staticmethod
     def from_file(path: StrPath) -> "TransXChange":
-        """
-        Get GTFS info from TransXChange elements.
+        """Load a TransXChange timetable XML file at the specified path.
 
-        Info:
-            - VehicleJourney element includes the departure time information
-            - JourneyPatternRef element includes information about the trip_id
-            - JourneyPatternSections include the leg duration information
-            - ServiceJourneyPatterns include information about which JourneyPatternSections
-            belong to a given VehicleJourney.
+        Args:
+            path: Path to a TransXChange timetable file.
 
-        GTFS fields - required/optional available from TransXChange - <fieldName> shows
-        foreign keys between layers:
-            - Stop_times: <trip_id>, arrival_time, departure_time, stop_id, stop_sequence
-            (and optional: shape_dist_travelled, timepoint)
-            - Trips: <route_id>, service_id, <trip_id>, (+ optional: trip_headsign,
-            direction_id, trip_shortname)
-            - Routes: <route_id>, agency_id, route_type, route_short_name, route_long_name
+        Returns:
+            A dataclass containing DataFrames.
         """
         parsers = _PARSERS
         kwargs: _ParseResult = {}
