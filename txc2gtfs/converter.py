@@ -59,7 +59,7 @@ from typing import TYPE_CHECKING
 import duckdb
 from duckdb import DuckDBPyConnection
 
-from transxchange import TransXChange
+from transxchange import Timetable
 
 from .calendar import get_calendar
 from .stop_times import get_stop_times
@@ -69,7 +69,7 @@ if TYPE_CHECKING:
     from _typeshed import StrPath
 
 
-def _register_with_duckdb(txc: TransXChange, conn: DuckDBPyConnection) -> None:
+def _register_with_duckdb(txc: Timetable, conn: DuckDBPyConnection) -> None:
     for field in dataclasses.fields(txc):
         if field.name == "metadata":
             continue
@@ -143,7 +143,7 @@ def get_agency(conn: DuckDBPyConnection) -> None:
 def append_txc_to_duckdb_conn(path: Path, conn: DuckDBPyConnection) -> None:
     # Parse GTFS info containing data about trips, calendar, stop_times and
     # calendar_dates
-    txc = TransXChange.from_file(path)
+    txc = Timetable.from_file(path)
 
     _register_with_duckdb(txc, conn)
 

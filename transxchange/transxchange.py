@@ -16,7 +16,7 @@ NS = {"txc": "http://www.transxchange.org.uk/"}
 
 
 @dataclass(slots=True, frozen=True)
-class TransXChangeMeta:
+class Metadata:
     filename: str
     creation_date: datetime
     modification_date: datetime | None
@@ -34,7 +34,7 @@ class _ParseResult(TypedDict):
     Must be kept up-to-date to match above.
     """
 
-    metadata: NotRequired[TransXChangeMeta]
+    metadata: NotRequired[Metadata]
     journey_pattern_sections: NotRequired[pd.DataFrame]
     journey_timing_links: NotRequired[pd.DataFrame]
     vehicle_journeys: NotRequired[pd.DataFrame]
@@ -46,7 +46,7 @@ class _ParseResult(TypedDict):
     route_locations: NotRequired[pd.DataFrame]
 
 
-type _ParserFn = Callable[[etree.Element, TransXChangeMeta], _ParseResult]
+type _ParserFn = Callable[[etree.Element, Metadata], _ParseResult]
 
 _PARSERS: dict[str, _ParserFn] = {}
 
@@ -61,7 +61,7 @@ def _register_parser(elem_name: str) -> Callable[[_ParserFn], _ParserFn]:
 
 @_register_parser("JourneyPatternSections")
 def _parse_journey_pattern_sections(
-    sections: etree.Element, metadata: TransXChangeMeta
+    sections: etree.Element, metadata: Metadata
 ) -> _ParseResult:
     def create_row(
         journey_pattern_section_id: str,
@@ -157,7 +157,7 @@ def _parse_weekdays(data: etree.Element, xpath: str) -> str | None:
 
 @_register_parser("VehicleJourneys")
 def _parse_vehicle_journeys(
-    journeys: etree.Element, metadata: TransXChangeMeta
+    journeys: etree.Element, metadata: Metadata
 ) -> _ParseResult:
     journey_qname = etree.QName(NS["txc"], "VehicleJourney")
 
@@ -251,7 +251,7 @@ def _parse_vehicle_journeys(
 
 
 @_register_parser("Routes")
-def _parse_routes(routes: etree.Element, metadata: TransXChangeMeta) -> _ParseResult:
+def _parse_routes(routes: etree.Element, metadata: Metadata) -> _ParseResult:
     def generate_rows():
         route_qname = etree.QName(NS["txc"], "Route")
 
@@ -284,7 +284,7 @@ def _parse_routes(routes: etree.Element, metadata: TransXChangeMeta) -> _ParseRe
 
 @_register_parser("StopPoints")
 def _parse_stop_points(
-    points: etree.Element, metadata: TransXChangeMeta
+    points: etree.Element, metadata: Metadata
 ) -> _ParseResult:
     def generate_rows():
         point_qname = etree.QName(NS["txc"], "AnnotatedStopPointRef")
@@ -308,7 +308,7 @@ def _parse_stop_points(
 
 @_register_parser("Operators")
 def _parse_operators(
-    operators: etree.Element, metadata: TransXChangeMeta
+    operators: etree.Element, metadata: Metadata
 ) -> _ParseResult:
     def generate_rows():
         operator_qname = etree.QName(NS["txc"], "Operator")
@@ -341,7 +341,7 @@ def _parse_direction(direction: str) -> Literal[0] | Literal[1]:
 
 @_register_parser("Services")
 def _parse_services(
-    services: etree.Element, metadata: TransXChangeMeta
+    services: etree.Element, metadata: Metadata
 ) -> _ParseResult:
     def generate_rows():
         service_qname = etree.QName(NS["txc"], "Service")
@@ -434,7 +434,7 @@ def _parse_services(
 
 @_register_parser("RouteSections")
 def _parse_route_sections(
-    route_sections: etree.Element, metadata: TransXChangeMeta
+    route_sections: etree.Element, metadata: Metadata
 ) -> _ParseResult:
     def generate_route_link_rows():
         route_section_qname = etree.QName(NS["txc"], "RouteSection")
@@ -496,7 +496,7 @@ def _parse_route_sections(
     return {"route_sections": route_sections_df, "route_locations": route_locations_df}
 
 
-def _parse_metadata(elem: etree.Element) -> TransXChangeMeta:
+def _parse_metadata(elem: etree.Element) -> Metadata:
     filename = elem.get("FileName")
     assert filename is not None
     creation_date = elem.get("CreationDateTime")
@@ -509,7 +509,7 @@ def _parse_metadata(elem: etree.Element) -> TransXChangeMeta:
     assert revision_num is not None
     revision_num = int(revision_num)
 
-    return TransXChangeMeta(
+    return Metadata(
         filename=filename,
         creation_date=creation_date,
         modification_date=modification_date,
@@ -518,8 +518,8 @@ def _parse_metadata(elem: etree.Element) -> TransXChangeMeta:
 
 
 @dataclass(slots=True, frozen=True)
-class TransXChange:
-    metadata: TransXChangeMeta
+class Timetable:
+    metadata: Metadata
     journey_pattern_sections: pd.DataFrame | None = None
     journey_timing_links: pd.DataFrame | None = None
     vehicle_journeys: pd.DataFrame | None = None
@@ -531,7 +531,7 @@ class TransXChange:
     route_locations: pd.DataFrame | None = None
 
     @staticmethod
-    def from_file(path: StrPath) -> "TransXChange":
+    def from_file(path: StrPath) -> "Timetable":
         """Load a TransXChange timetable XML file at the specified path.
 
         Args:
@@ -542,7 +542,7 @@ class TransXChange:
         """
         parsers = _PARSERS
         kwargs: _ParseResult = {}
-        metadata: TransXChangeMeta | None = None
+        metadata: Metadata | None = None
 
         for event, elem in etree.iterparse(
             path,
@@ -571,4 +571,4 @@ class TransXChange:
 
         assert "metadata" in kwargs
 
-        return TransXChange(**kwargs)
+        return Timetable(**kwargs)

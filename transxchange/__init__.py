@@ -1,3 +1,3 @@
-from .transxchange import TransXChange, TransXChangeMeta
+from .transxchange import Metadata, Timetable
 
-__all__ = ("TransXChange", "TransXChangeMeta")
+__all__ = ("Metadata", "Timetable")
