@@ -50,13 +50,13 @@ MIT.
 from __future__ import annotations
 
 import dataclasses
+import os
 import textwrap
 from collections.abc import Generator, Iterable
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
 from tempfile import TemporaryDirectory
-import os
+from typing import TYPE_CHECKING
 
 import duckdb
 from duckdb import DuckDBPyConnection
@@ -66,7 +66,6 @@ from .gtfs import export_to_zip
 from .stop_times import get_stop_times
 from .transxchange import TransXChange, parse_transxchange_file
 from .trips import get_trips
-from .util.network import download_cached
 
 if TYPE_CHECKING:
     from _typeshed import StrPath
@@ -101,7 +100,8 @@ def get_stops(conn: DuckDBPyConnection) -> None:
 
 
 def get_routes(conn: DuckDBPyConnection) -> None:
-    conn.execute(textwrap.dedent("""
+    conn.execute(
+        textwrap.dedent("""
     -- CREATE TYPE route_type_type AS ENUM (
     --     'tram_streetcar_rail', 'subway_metro', 'rail', 'bus', 'ferry', 'cable_tram',
     --     'aerial_lift', 'funicular'
@@ -124,7 +124,8 @@ def get_routes(conn: DuckDBPyConnection) -> None:
         travel_mode AS route_type
     FROM txc_services
     WHERE direction_id = 'outbound'
-    """))
+    """)
+    )
 
 
 def parse_txc_to_sql_conn(path: Path, conn: DuckDBPyConnection) -> None:
@@ -189,7 +190,7 @@ def convert(
     with TemporaryDirectory(prefix="txc2gtfs-") as temp:
         temp_path = Path(temp)
 
-        def do_parse_txc_to_sql(inp: tuple[int, Path]) -> None:
+        def do_parse_txc_to_sql(inp: tuple[int, Path]) -> Path:
             i, txc_file = inp
             with duckdb.connect() as conn:
                 parse_txc_to_sql_conn(txc_file, conn)
@@ -197,20 +198,24 @@ def convert(
                 path = temp_path / f"worker-{i}"
                 path.mkdir()
 
-                conn.execute(textwrap.dedent("""
+                conn.execute(
+                    textwrap.dedent("""
                 COPY stops TO concat($path, 'stops.csv')
                 COPY stop_times TO concat($path, 'stop_times.csv')
                 COPY trips TO concat($path, 'trips.csv')
                 COPY calendar TO concat($path, 'calendar.csv')
                 COPY routes TO concat($path, 'routes.csv')
-                """), {"path": f"{path}{os.path.sep}"})
+                """),
+                    {"path": f"{path}{os.path.sep}"},
+                )
+
+                return path
 
         # Create workers
         if num_workers > 1:
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                executor.map(do_parse_txc_to_sql, enumerate(input))
+                worker_output = executor.map(do_parse_txc_to_sql, enumerate(input))
         else:
-            for txc_file in input:
-                do_parse_txc_to_sql((0, txc_file))
+            worker_output = (do_parse_txc_to_sql((0, txc_file)) for txc_file in input)
 
-        export_to_zip(out_gtfs_db, temp_path)
+        export_to_zip(out_gtfs_db, output, worker_output)
