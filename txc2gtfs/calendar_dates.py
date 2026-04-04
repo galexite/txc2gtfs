@@ -68,7 +68,7 @@ def get_calendar_dates(gtfs_info: pd.DataFrame) -> pd.DataFrame | None:
 
     # Iterate over services and produce rows not operating on given bank holiday dates
     def gen_calendar_dates() -> Generator[tuple[str, str, int], None, None]:
-        for _, row in gtfs_info.drop_duplicates(subset=["service_id"]).iterrows():  # type: ignore
+        for _, row in gtfs_info.drop_duplicates(subset=["service_id"]).iterrows():
             # Iterate over exception dates
             for date in bank_holidays:
                 # Generate row

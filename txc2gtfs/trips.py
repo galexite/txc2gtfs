@@ -5,17 +5,13 @@ from duckdb import DuckDBPyConnection
 
 def get_trips(conn: DuckDBPyConnection) -> None:
     conn.execute("""
-    CREATE TYPE direction_id_type AS ENUM (
-        'outbound', 'inbound'
-    );
-
     CREATE OR REPLACE TABLE trips (
         trip_id VARCHAR PRIMARY KEY,
         route_id VARCHAR,
         service_id VARCHAR,
         trip_headsign VARCHAR,
         trip_short_name VARCHAR,
-        direction_id direction_id_type
+        direction_id INTEGER,
     );
 
     INSERT INTO trips
@@ -25,6 +21,6 @@ def get_trips(conn: DuckDBPyConnection) -> None:
         service_code as service_id,
         trip_headsign,
         description AS trip_short_name,
-        direction_id::direction_id_type
+        CASE WHEN direction_id = 'inbound' THEN 1 ELSE 0 END
     FROM txc_services
     """)

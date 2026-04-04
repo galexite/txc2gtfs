@@ -4,13 +4,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from decimal import Decimal
-from pathlib import Path
-from typing import Literal, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
+
+if TYPE_CHECKING:
+    from _typeshed import StrPath
 
 import pandas as pd
 from lxml import etree
 
-from .util.xml import NS
+NS = {"txc": "http://www.transxchange.org.uk/"}
 
 
 @dataclass(slots=True, frozen=True)
@@ -24,20 +26,6 @@ class TransXChangeMeta:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dataset_id", f"{self.filename}#{self.revision_num}")
-
-
-@dataclass(slots=True, frozen=True)
-class TransXChange:
-    metadata: TransXChangeMeta
-    journey_pattern_sections: pd.DataFrame | None = None
-    journey_timing_links: pd.DataFrame | None = None
-    vehicle_journeys: pd.DataFrame | None = None
-    services: pd.DataFrame | None = None
-    routes: pd.DataFrame | None = None
-    stop_points: pd.DataFrame | None = None
-    operators: pd.DataFrame | None = None
-    route_sections: pd.DataFrame | None = None
-    route_locations: pd.DataFrame | None = None
 
 
 class _ParseResult(TypedDict):
@@ -529,54 +517,68 @@ def _parse_metadata(elem: etree.Element) -> TransXChangeMeta:
     )
 
 
-def parse_transxchange_file(path: Path) -> TransXChange:
-    """
-    Get GTFS info from TransXChange elements.
+@dataclass(slots=True, frozen=True)
+class TransXChange:
+    metadata: TransXChangeMeta
+    journey_pattern_sections: pd.DataFrame | None = None
+    journey_timing_links: pd.DataFrame | None = None
+    vehicle_journeys: pd.DataFrame | None = None
+    services: pd.DataFrame | None = None
+    routes: pd.DataFrame | None = None
+    stop_points: pd.DataFrame | None = None
+    operators: pd.DataFrame | None = None
+    route_sections: pd.DataFrame | None = None
+    route_locations: pd.DataFrame | None = None
 
-    Info:
-        - VehicleJourney element includes the departure time information
-        - JourneyPatternRef element includes information about the trip_id
-        - JourneyPatternSections include the leg duration information
-        - ServiceJourneyPatterns include information about which JourneyPatternSections
-          belong to a given VehicleJourney.
+    @staticmethod
+    def from_file(path: StrPath) -> "TransXChange":
+        """
+        Get GTFS info from TransXChange elements.
 
-    GTFS fields - required/optional available from TransXChange - <fieldName> shows
-    foreign keys between layers:
-        - Stop_times: <trip_id>, arrival_time, departure_time, stop_id, stop_sequence
-          (and optional: shape_dist_travelled, timepoint)
-        - Trips: <route_id>, service_id, <trip_id>, (+ optional: trip_headsign,
-          direction_id, trip_shortname)
-        - Routes: <route_id>, agency_id, route_type, route_short_name, route_long_name
-    """
-    parsers = _PARSERS
-    kwargs: _ParseResult = {}
-    metadata: TransXChangeMeta | None = None
+        Info:
+            - VehicleJourney element includes the departure time information
+            - JourneyPatternRef element includes information about the trip_id
+            - JourneyPatternSections include the leg duration information
+            - ServiceJourneyPatterns include information about which JourneyPatternSections
+            belong to a given VehicleJourney.
 
-    for event, elem in etree.iterparse(
-        path,
-        ("start", "end"),
-        tag=[
-            etree.QName(NS["txc"], "TransXChange"),
-            *(etree.QName(NS["txc"], tag) for tag in parsers.keys()),
-        ],
-        remove_blank_text=True,
-        remove_comments=True,
-        remove_pis=True,
-    ):
-        tag = etree.QName(cast(str, elem.tag)).localname
-        if event == "start":
-            if tag == "TransXChange":
-                metadata = _parse_metadata(elem)
-                kwargs["metadata"] = metadata
-            continue
-        elif tag == "TransXChange":
-            continue
+        GTFS fields - required/optional available from TransXChange - <fieldName> shows
+        foreign keys between layers:
+            - Stop_times: <trip_id>, arrival_time, departure_time, stop_id, stop_sequence
+            (and optional: shape_dist_travelled, timepoint)
+            - Trips: <route_id>, service_id, <trip_id>, (+ optional: trip_headsign,
+            direction_id, trip_shortname)
+            - Routes: <route_id>, agency_id, route_type, route_short_name, route_long_name
+        """
+        parsers = _PARSERS
+        kwargs: _ParseResult = {}
+        metadata: TransXChangeMeta | None = None
 
-        assert metadata is not None
-        kwargs.update(parsers[tag](elem, metadata))
+        for event, elem in etree.iterparse(
+            path,
+            ("start", "end"),
+            tag=[
+                etree.QName(NS["txc"], "TransXChange"),
+                *(etree.QName(NS["txc"], tag) for tag in parsers.keys()),
+            ],
+            remove_blank_text=True,
+            remove_comments=True,
+            remove_pis=True,
+        ):
+            tag = etree.QName(cast(str, elem.tag)).localname
+            if event == "start":
+                if tag == "TransXChange":
+                    metadata = _parse_metadata(elem)
+                    kwargs["metadata"] = metadata
+                continue
+            elif tag == "TransXChange":
+                continue
 
-        elem.clear()
+            assert metadata is not None
+            kwargs.update(parsers[tag](elem, metadata))
 
-    assert "metadata" in kwargs
+            elem.clear()
 
-    return TransXChange(**kwargs)
+        assert "metadata" in kwargs
+
+        return TransXChange(**kwargs)

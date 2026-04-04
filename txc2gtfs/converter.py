@@ -50,21 +50,19 @@ MIT.
 from __future__ import annotations
 
 import dataclasses
-import os
-import textwrap
-from collections.abc import Generator, Iterable
-from concurrent.futures import ProcessPoolExecutor
+import tempfile
+import zipfile
+from collections.abc import Iterable
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import duckdb
 from duckdb import DuckDBPyConnection
 
+from transxchange import TransXChange
+
 from .calendar import get_calendar
-from .gtfs import export_to_zip
 from .stop_times import get_stop_times
-from .transxchange import TransXChange, parse_transxchange_file
 from .trips import get_trips
 
 if TYPE_CHECKING:
@@ -80,7 +78,7 @@ def _register_with_duckdb(txc: TransXChange, conn: DuckDBPyConnection) -> None:
 
 def get_stops(conn: DuckDBPyConnection) -> None:
     conn.execute(
-        textwrap.dedent("""
+        """
     CREATE OR REPLACE TABLE stops (
         stop_id VARCHAR PRIMARY KEY,
         stop_name VARCHAR,
@@ -95,18 +93,13 @@ def get_stops(conn: DuckDBPyConnection) -> None:
         NULL as stop_lat,
         NULL as stop_lon
     FROM txc_stop_points
-    """)
+    """
     )
 
 
 def get_routes(conn: DuckDBPyConnection) -> None:
     conn.execute(
-        textwrap.dedent("""
-    -- CREATE TYPE route_type_type AS ENUM (
-    --     'tram_streetcar_rail', 'subway_metro', 'rail', 'bus', 'ferry', 'cable_tram',
-    --     'aerial_lift', 'funicular'
-    -- );
-
+        """
     CREATE OR REPLACE TABLE routes (
         route_id VARCHAR PRIMARY KEY,
         agency_id VARCHAR,
@@ -124,14 +117,33 @@ def get_routes(conn: DuckDBPyConnection) -> None:
         travel_mode AS route_type
     FROM txc_services
     WHERE direction_id = 'outbound'
-    """)
+    """
     )
 
 
-def parse_txc_to_sql_conn(path: Path, conn: DuckDBPyConnection) -> None:
+def get_agency(conn: DuckDBPyConnection) -> None:
+    conn.execute("""
+    CREATE OR REPLACE TABLE agency (
+        agency_id VARCHAR PRIMARY KEY,
+        agency_name VARCHAR,
+        agency_url VARCHAR,
+        agency_timezone VARCHAR
+    );
+
+    INSERT INTO agency
+    SELECT
+        agency_id,
+        agency_name,
+        '' as agency_url,
+        'Europe/London' as agency_timezone
+    FROM txc_operators
+    """)
+
+
+def append_txc_to_duckdb_conn(path: Path, conn: DuckDBPyConnection) -> None:
     # Parse GTFS info containing data about trips, calendar, stop_times and
     # calendar_dates
-    txc = parse_transxchange_file(path)
+    txc = TransXChange.from_file(path)
 
     _register_with_duckdb(txc, conn)
 
@@ -141,23 +153,22 @@ def parse_txc_to_sql_conn(path: Path, conn: DuckDBPyConnection) -> None:
     get_calendar(conn)
     # get_calendar_dates(conn)
     get_routes(conn)
-    # get_agency(conn)
+    get_agency(conn)
 
 
-def _iterate_paths(input: Iterable[StrPath]) -> Generator[Path, None, None]:
-    for path in input:
-        path = Path(path)
-        if path.is_dir():
-            yield from path.glob("*.xml")
-            continue
-        yield path
+GTFS_FILES = [
+    "agency.txt",
+    "calendar.txt",
+    "routes.txt",
+    "stop_times.txt",
+    "stops.txt",
+    "trips.txt",
+]
 
 
 def convert(
     input: Iterable[StrPath],
     output: StrPath,
-    append_to_existing: bool = False,
-    num_workers: int = 1,
 ) -> None:
     """
     Converts TransXchange formatted schedule data into GTFS feed.
@@ -168,45 +179,19 @@ def convert(
         containing .xml files.)
     output_filepath : str
         Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
-    append_to_existing : bool (default is False)
-        Flag for appending to existing gtfs-database. This might be useful if you have
-        TransXchange .xml files distributed into multiple directories (e.g. separate
-        files for train data, tube data and bus data) and you want to merge all those
-        datasets into a single GTFS feed.
-    worker_cnt : int
-        Number of workers to distribute the conversion process. By default the number of
-        CPUs is used.
     """
-    input = _iterate_paths(input)
-    with TemporaryDirectory(prefix="txc2gtfs-") as temp:
-        temp_path = Path(temp)
+    with duckdb.connect() as conn:
+        for txc_file in input:
+            append_txc_to_duckdb_conn(Path(txc_file), conn)
 
-        def do_parse_txc_to_sql(inp: tuple[int, Path]) -> Path:
-            i, txc_file = inp
-            with duckdb.connect() as conn:
-                parse_txc_to_sql_conn(txc_file, conn)
-
-                path = temp_path / f"worker-{i}"
-                path.mkdir()
-
+        with (
+            tempfile.TemporaryDirectory(prefix="txc2gtfs-") as temp_dir,
+            zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_STORED) as zf,
+        ):
+            for txt_file_name in GTFS_FILES:
+                path = Path(temp_dir) / txt_file_name
                 conn.execute(
-                    textwrap.dedent("""
-                COPY stops TO concat($path, 'stops.csv')
-                COPY stop_times TO concat($path, 'stop_times.csv')
-                COPY trips TO concat($path, 'trips.csv')
-                COPY calendar TO concat($path, 'calendar.csv')
-                COPY routes TO concat($path, 'routes.csv')
-                """),
-                    {"path": f"{path}{os.path.sep}"},
+                    f"COPY {txt_file_name[:-4]} TO ? (FORMAT csv, DATEFORMAT '%Y%m%d')",
+                    [str(path)],
                 )
-
-                return path
-
-        # Create workers
-        if num_workers > 1:
-            with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                worker_output = executor.map(do_parse_txc_to_sql, enumerate(input))
-        else:
-            worker_output = (do_parse_txc_to_sql((0, txc_file)) for txc_file in input)
-
-        export_to_zip(Path(output), worker_output)
+                zf.write(path, txt_file_name)

@@ -29,7 +29,7 @@ readme = "README.md"
 txc2gtfs = "txc2gtfs.cli:main"
 
 [tool.setuptools]
-packages = ["txc2gtfs"]
+packages = ["transxchange", "txc2gtfs"]
 
 [dependency-groups]
 dev = [

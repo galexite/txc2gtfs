@@ -6,23 +6,15 @@ from duckdb import DuckDBPyConnection
 def get_stop_times(conn: DuckDBPyConnection) -> None:
     conn.execute(
         textwrap.dedent("""
-    CREATE TYPE pickup_dropoff_type AS ENUM (
-        'regular', 'not_available', 'agency_request', 'driver_request'
-    );
-
-    CREATE TYPE timepoint_type AS ENUM (
-        'approximate', 'exact'
-    );
-
     CREATE OR REPLACE TABLE stop_times (
         trip_id VARCHAR,
         arrival_time TIME,
         departure_time TIME,
         stop_id VARCHAR,
         stop_sequence INTEGER,
-        pickup_type pickup_dropoff_type,
-        dropoff_type pickup_dropoff_type,
-        timepoint timepoint_type
+        pickup_type INTEGER,
+        dropoff_type INTEGER,
+        timepoint INTEGER
     );
 
     INSERT INTO stop_times
@@ -41,16 +33,16 @@ def get_stop_times(conn: DuckDBPyConnection) -> None:
         stop_id,
         stop_sequence,
         CASE WHEN activity IN ('pickUp', 'pickUpAndSetDown')
-            THEN 'regular'::pickup_dropoff_type
-            ELSE 'not_available'::pickup_dropoff_type
+            THEN 0
+            ELSE 1 -- 'not available'
         END AS pickup_type,
         CASE WHEN activity IN ('setDown', 'pickUpAndSetDown')
-            THEN 'regular'::pickup_dropoff_type
-            ELSE 'not_available'::pickup_dropoff_type
+            THEN 0
+            ELSE 1 -- 'not available'
         END AS dropoff_type,
         CASE WHEN timing_point_status = 'principalTimingPoint'
-            THEN 'exact'::timepoint_type
-            ELSE 'approximate'::timepoint_type
+            THEN 1 -- exact
+            ELSE 0 -- approximate
         END AS timepoint_type
     FROM (
         SELECT

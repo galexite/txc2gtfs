@@ -8,13 +8,13 @@ def get_calendar(conn: DuckDBPyConnection) -> None:
         textwrap.dedent("""
     CREATE OR REPLACE TABLE calendar (
         service_id VARCHAR,
-        monday BOOLEAN,
-        tuesday BOOLEAN,
-        wednesday BOOLEAN,
-        thursday BOOLEAN,
-        friday BOOLEAN,
-        saturday BOOLEAN,
-        sunday BOOLEAN,
+        monday INTEGER,
+        tuesday INTEGER,
+        wednesday INTEGER,
+        thursday INTEGER,
+        friday INTEGER,
+        saturday INTEGER,
+        sunday INTEGER,
         start_date DATE,
         end_date DATE
     );
