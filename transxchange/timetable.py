@@ -133,14 +133,11 @@ def _parse_service_mode(service: etree.Element) -> int:
     return 3  # default to bus
 
 
-def _parse_weekdays(data: etree.Element, xpath: str) -> str | None:
-    weekdays = data.findall(xpath, NS)
-    if not weekdays:
-        return None
-
-    return "|".join(
-        cast(str, weekday.tag).rsplit("}", maxsplit=1)[1] for weekday in weekdays
-    )
+def _parse_days(data: etree.Element, xpath: str) -> list[str]:
+    return [
+        cast(str, weekday.tag).rsplit("}", maxsplit=1)[1]
+        for weekday in data.findall(xpath, NS)
+    ]
 
 
 @_register_parser("VehicleJourneys")
@@ -166,12 +163,12 @@ def _parse_vehicle_journeys(
             assert vehicle_journey_id
 
             # Parse weekday operation times from VehicleJourney
-            operation_days = _parse_weekdays(
+            operation_days = _parse_days(
                 journey, "./txc:OperatingProfile/txc:RegularDayType/txc:DaysOfWeek/*"
             )
 
             # Parse calendar dates (exceptions in operation)
-            non_operative_days = _parse_weekdays(
+            non_operative_days = _parse_days(
                 journey,
                 "./txc:OperatingProfile/txc:BankHolidayOperation/txc:DaysOfNonOperation/*",
             )
@@ -271,9 +268,7 @@ def _parse_routes(routes: etree.Element, metadata: Metadata) -> _ParseResult:
 
 
 @_register_parser("StopPoints")
-def _parse_stop_points(
-    points: etree.Element, metadata: Metadata
-) -> _ParseResult:
+def _parse_stop_points(points: etree.Element, metadata: Metadata) -> _ParseResult:
     def generate_rows():
         point_qname = etree.QName(NS["txc"], "AnnotatedStopPointRef")
 
@@ -295,9 +290,7 @@ def _parse_stop_points(
 
 
 @_register_parser("Operators")
-def _parse_operators(
-    operators: etree.Element, metadata: Metadata
-) -> _ParseResult:
+def _parse_operators(operators: etree.Element, metadata: Metadata) -> _ParseResult:
     def generate_rows():
         operator_qname = etree.QName(NS["txc"], "Operator")
 
@@ -328,9 +321,7 @@ def _parse_direction(direction: str) -> Literal[0] | Literal[1]:
 
 
 @_register_parser("Services")
-def _parse_services(
-    services: etree.Element, metadata: Metadata
-) -> _ParseResult:
+def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult:
     def generate_rows():
         service_qname = etree.QName(NS["txc"], "Service")
 

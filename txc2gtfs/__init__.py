@@ -1,3 +1,3 @@
-from txc2gtfs.converter import convert
+from .convert import convert
 
-__all__ = ["convert"]
+__all__ = ("convert",)
