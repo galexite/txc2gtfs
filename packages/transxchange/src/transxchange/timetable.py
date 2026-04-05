@@ -23,10 +23,12 @@ class _ParseResult(TypedDict):
     """
 
     metadata: NotRequired[Metadata]
+    services: NotRequired[pd.DataFrame]
+    lines: NotRequired[pd.DataFrame]
+    journey_patterns: NotRequired[pd.DataFrame]
     journey_pattern_sections: NotRequired[pd.DataFrame]
     journey_timing_links: NotRequired[pd.DataFrame]
     vehicle_journeys: NotRequired[pd.DataFrame]
-    services: NotRequired[pd.DataFrame]
     routes: NotRequired[pd.DataFrame]
     stop_points: NotRequired[pd.DataFrame]
     operators: NotRequired[pd.DataFrame]
@@ -322,9 +324,9 @@ def _parse_direction(direction: str) -> Literal[0] | Literal[1]:
 
 @_register_parser("Services")
 def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult:
-    def generate_rows():
-        service_qname = etree.QName(NS["txc"], "Service")
+    service_qname = etree.QName(NS["txc"], "Service")
 
+    def generate_service_rows():
         for service in services.iterchildren(service_qname):
             # Service code
             service_code = service.findtext("txc:ServiceCode", None, NS)
@@ -349,6 +351,20 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
                 "./txc:StandardService/txc:Destination", None, NS
             )
 
+            yield {
+                "service_code": service_code,
+                "agency_id": agency_id,
+                "mode": mode,
+                "start_date": start_date,
+                "end_date": end_date,
+                "origin": origin,
+                "destination": destination,
+            }
+
+    def generate_line_rows():
+        for service in services.iterchildren(service_qname):
+            service_code = service.findtext("txc:ServiceCode", None, NS)
+
             for line in service.iterfind("./txc:Lines/txc:Line", NS):
                 line_id = line.get("id")
                 assert line_id
@@ -363,6 +379,21 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
                     "./txc:InboundDescription/txc:Description", None, NS
                 )
 
+            yield {
+                "service_code": service_code,
+                "line_id": line_id,
+                "line_name": line_name,
+                "outbound_description": outbound_description,
+                "inbound_description": inbound_description,
+            }
+
+    def generate_journey_pattern_rows():
+        for service in services.iterchildren(service_qname):
+            service_code = service.findtext("txc:ServiceCode", None, NS)
+
+            for line in service.iterfind("./txc:Lines/txc:Line", NS):
+                line_id = line.get("id")
+                assert line_id
                 for pattern in service.iterfind(
                     "./txc:StandardService/txc:JourneyPattern", NS
                 ):
@@ -378,8 +409,6 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
                     direction = pattern.findtext("./txc:Direction", None, NS)
                     assert direction
 
-                    # Headsign
-                    headsign = origin if direction == 0 else destination
                     # Route Reference
                     route_ref = pattern.findtext("txc:RouteRef", None, NS)
 
@@ -387,18 +416,9 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
                         "service_code": service_code,
                         "line_id": line_id,
                         "journey_pattern_id": journey_pattern_id,
-                        "agency_id": agency_id,
-                        "line_name": line_name,
-                        "travel_mode": mode,
-                        "description": outbound_description
-                        if direction == "outbound"
-                        else inbound_description,
-                        "trip_headsign": headsign,
                         "journey_pattern_section_id": section_ref,
                         "direction_id": direction,
                         "route_id": route_ref,
-                        "start_date": start_date,
-                        "end_date": end_date,
                     }
 
                     pattern.clear()
@@ -407,8 +427,11 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
 
             service.clear()
 
-    df = pd.DataFrame(generate_rows())
-    return {"services": df}
+    return {
+        "services": pd.DataFrame(generate_service_rows()),
+        "lines": pd.DataFrame(generate_line_rows()),
+        "journey_patterns": pd.DataFrame(generate_journey_pattern_rows()),
+    }
 
 
 @_register_parser("RouteSections")
@@ -478,10 +501,12 @@ def _parse_route_sections(
 @dataclass(slots=True, frozen=True)
 class Timetable:
     metadata: Metadata
+    services: pd.DataFrame | None = None
+    lines: pd.DataFrame | None = None
+    journey_patterns: pd.DataFrame | None = None
     journey_pattern_sections: pd.DataFrame | None = None
     journey_timing_links: pd.DataFrame | None = None
     vehicle_journeys: pd.DataFrame | None = None
-    services: pd.DataFrame | None = None
     routes: pd.DataFrame | None = None
     stop_points: pd.DataFrame | None = None
     operators: pd.DataFrame | None = None

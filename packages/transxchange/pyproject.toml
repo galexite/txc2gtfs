@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transxchange"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "lxml>=6.0.0",
+    "pandas>=2.2.0",
+]

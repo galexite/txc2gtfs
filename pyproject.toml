@@ -10,8 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "duckdb>=1.5.0",
     "filelock>=3.17.0",
-    "lxml>=6.0.0",
-    "pandas>=2.2.0",
+    "transxchange"
 ]
 license.file = "LICENSE"
 authors = [{ name = "Henrikki Tenkanen", email = "h.tenkanen@ucl.ac.uk" }]
@@ -28,18 +27,26 @@ readme = "README.md"
 [project.scripts]
 txc2gtfs = "txc2gtfs.cli:main"
 
-[tool.setuptools]
-packages = ["transxchange", "txc2gtfs"]
-
 [dependency-groups]
 dev = [
-    "pandas-stubs>=2.3.3.251219",
     "pytest>=8.3.4",
-    "requests>=2.32.3",
-    "ruff>=0.9.6",
+    { include-group = "lint" },
+    { include-group = "types" }
+]
+lint = [
+    "ruff",
+]
+types = [
+    "pandas-stubs>=2.3.3.251219",
     "types-lxml>=2025.11.25",
 ]
 
 [tool.ruff.lint]
 fixable = ["ALL"]
 select = ["E", "W", "F", "N", "I", "UP", "FURB", "PERF", "RUF"]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+transxchange = { workspace = true }

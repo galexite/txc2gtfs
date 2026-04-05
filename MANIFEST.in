@@ -1,3 +1,0 @@
-include txc2gtfs/data/Stops.txt
-include txc2gtfs/data/bank-holidays.json
-include txc2gtfs/data/test_data/*

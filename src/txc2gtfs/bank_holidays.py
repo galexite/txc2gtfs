@@ -8,7 +8,8 @@ _BANK_HOLIDAYS_JSON_URL = "https://www.gov.uk/bank-holidays.json"
 def load_bank_holidays(conn: DuckDBPyConnection) -> None:
     bank_holidays_path = download_cached(_BANK_HOLIDAYS_JSON_URL)
 
-    conn.execute("""
+    conn.execute(
+        """
     CREATE TABLE bank_holidays AS
     WITH
         divisions AS (
@@ -45,4 +46,6 @@ def load_bank_holidays(conn: DuckDBPyConnection) -> None:
     FROM events
     GROUP BY date, title, notes
     ORDER BY date
-    """, [str(bank_holidays_path)])
+    """,
+        [str(bank_holidays_path)],
+    )

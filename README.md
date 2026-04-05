@@ -61,13 +61,6 @@ Or use it as a Python library:
 
 See the docstring on `convert` for more information.
 
-## Output
-
-After you have successfully converted the TransXchange into GTFS, you can start doing
-multimodal routing with your favourite routing engine such as OpenTripPlanner:
-
-![OTP_example_in_London](img/London_multimodal_route.PNG)
-
 ## Citation
 
 If you use this tool for research purposes, we encourage you to cite this work:

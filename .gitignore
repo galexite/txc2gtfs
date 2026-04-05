@@ -12,3 +12,5 @@ gtfs/
 examples
 .vscode/launch.json
 *.csv
+compile_commands.json
+.cache

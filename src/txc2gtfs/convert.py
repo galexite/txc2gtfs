@@ -62,6 +62,7 @@ from duckdb import DuckDBPyConnection
 
 from transxchange import Timetable
 from txc2gtfs.bank_holidays import load_bank_holidays
+from txc2gtfs.naptan import load_naptan_stops
 
 if TYPE_CHECKING:
     from _typeshed import StrPath
@@ -82,11 +83,12 @@ def _insert_stops(conn: DuckDBPyConnection) -> None:
     conn.execute("""
     INSERT INTO stops
     SELECT
-        stop_id,
-        stop_name,
-        NULL as stop_lat,
-        NULL as stop_lon
-    FROM txc_stop_points
+        sp.stop_id,
+        sp.stop_name,
+        naptan.Latitude as stop_lat,
+        naptan.Longitude as stop_lon
+    FROM txc_stop_points sp
+    JOIN naptan_stops naptan ON sp.stop_id = naptan.ATCOCode
     """)
 
 
@@ -133,7 +135,7 @@ def _insert_agency(conn: DuckDBPyConnection) -> None:
     SELECT
         agency_id,
         agency_name,
-        '' AS agency_url,
+        'https://www.traveline.info/' AS agency_url,
         'Europe/London' AS agency_timezone
     FROM txc_operators
     """)
@@ -148,7 +150,7 @@ def _create_stop_times(conn: DuckDBPyConnection) -> None:
         stop_id VARCHAR,
         stop_sequence INTEGER,
         pickup_type INTEGER,
-        dropoff_type INTEGER,
+        drop_off_type INTEGER,
         timepoint INTEGER
     )
     """)
@@ -178,7 +180,7 @@ def _insert_stop_times(conn: DuckDBPyConnection) -> None:
         CASE WHEN activity IN ('setDown', 'pickUpAndSetDown')
             THEN 0 -- regular
             ELSE 1 -- not available
-        END AS dropoff_type,
+        END AS drop_off_type,
         CASE WHEN timing_point_status = 'principalTimingPoint'
             THEN 1 -- exact
             ELSE 0 -- approximate
@@ -208,16 +210,16 @@ def _insert_stop_times(conn: DuckDBPyConnection) -> None:
 def _create_calendar(conn: DuckDBPyConnection) -> None:
     conn.execute("""
     CREATE OR REPLACE TABLE calendar (
-        service_id VARCHAR,
-        monday INTEGER,
-        tuesday INTEGER,
-        wednesday INTEGER,
-        thursday INTEGER,
-        friday INTEGER,
-        saturday INTEGER,
-        sunday INTEGER,
-        start_date DATE,
-        end_date DATE
+        service_id VARCHAR NOT NULL,
+        monday INTEGER NOT NULL,
+        tuesday INTEGER NOT NULL,
+        wednesday INTEGER NOT NULL,
+        thursday INTEGER NOT NULL,
+        friday INTEGER NOT NULL,
+        saturday INTEGER NOT NULL,
+        sunday INTEGER NOT NULL,
+        start_date DATE NOT NULL,
+        end_date DATE NOT NULL
     );
     """)
 
@@ -235,10 +237,13 @@ def _insert_calendar(conn: DuckDBPyConnection) -> None:
         'Saturday' IN operation_days OR 'Weekend' IN operation_days AS saturday,
         'Sunday' IN operation_days OR 'Weekend' IN operation_days AS sunday,
         start_date,
-        end_date
+        CASE WHEN end_date IS NULL
+            THEN start_date + INTERVAL '5 years'
+            ELSE end_date
+        END AS end_date
     FROM (
         SELECT
-            s.service_code AS service_id,
+            (s.service_code || ':' || vj.vehicle_journey_id) AS service_id,
             vj.operation_days AS operation_days,
             s.start_date AS start_date,
             s.end_date AS end_date
@@ -288,7 +293,7 @@ def _insert_calendar_dates(conn: DuckDBPyConnection) -> None:
 
     fixed_holiday_dates AS (
         SELECT
-            s.service_code AS service_id,
+            (s.service_code || ':' || vj.vehicle_journey_id) AS service_id,
             s.start_date,
             s.end_date,
             vj.non_operative_days,
@@ -320,7 +325,7 @@ def _insert_calendar_dates(conn: DuckDBPyConnection) -> None:
 
     variable_holiday_dates AS (
         SELECT
-            s.service_code AS service_id,
+            (s.service_code || ':' || vj.vehicle_journey_id) AS service_id,
             s.start_date,
             s.end_date,
             bh.date AS holiday_date
@@ -371,7 +376,7 @@ def _insert_trips(conn: DuckDBPyConnection) -> None:
     conn.execute("""
     INSERT INTO trips
     SELECT
-        concat(service_code, ':', journey_pattern_id) AS trip_id,
+        (service_code || ':' || journey_pattern_id) AS trip_id,
         line_id as route_id,
         service_code as service_id,
         trip_headsign,
@@ -440,6 +445,7 @@ def convert(
 
         load_bank_holidays(conn)
         load_bank_holiday_map(conn)
+        load_naptan_stops(conn)
 
         for txc_file in input:
             _insert_txc_file(Path(txc_file), conn)
