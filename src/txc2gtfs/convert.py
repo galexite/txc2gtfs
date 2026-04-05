@@ -58,9 +58,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import duckdb
-from duckdb import DuckDBPyConnection
-
 from transxchange import Timetable
+
 from txc2gtfs.bank_holidays import load_bank_holidays
 from txc2gtfs.naptan import load_naptan_stops
 
@@ -68,7 +67,7 @@ if TYPE_CHECKING:
     from _typeshed import StrPath
 
 
-def _create_stops(conn: DuckDBPyConnection) -> None:
+def _create_stops(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     CREATE OR REPLACE TABLE stops (
         stop_id VARCHAR PRIMARY KEY,
@@ -79,7 +78,7 @@ def _create_stops(conn: DuckDBPyConnection) -> None:
     """)
 
 
-def _insert_stops(conn: DuckDBPyConnection) -> None:
+def _insert_stops(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     INSERT INTO stops
     SELECT
@@ -92,33 +91,31 @@ def _insert_stops(conn: DuckDBPyConnection) -> None:
     """)
 
 
-def _create_routes(conn: DuckDBPyConnection) -> None:
+def _create_routes(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     CREATE OR REPLACE TABLE routes (
         route_id VARCHAR PRIMARY KEY,
         agency_id VARCHAR,
         route_short_name VARCHAR,
-        route_long_name VARCHAR,
         route_type INTEGER
     )
     """)
 
 
-def _insert_routes(conn: DuckDBPyConnection) -> None:
+def _insert_routes(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     INSERT INTO routes
     SELECT DISTINCT
-        line_id AS route_id,
-        agency_id,
-        line_name as route_short_name,
-        description as route_long_name,
-        travel_mode AS route_type
-    FROM txc_services
-    WHERE direction_id = 'outbound'
+        l.line_id AS route_id,
+        s.agency_id,
+        l.line_name as route_short_name,
+        s.mode AS route_type
+    FROM txc_services s
+    NATURAL JOIN txc_lines l
     """)
 
 
-def _create_agency(conn: DuckDBPyConnection) -> None:
+def _create_agency(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     CREATE OR REPLACE TABLE agency (
         agency_id VARCHAR PRIMARY KEY,
@@ -129,7 +126,7 @@ def _create_agency(conn: DuckDBPyConnection) -> None:
     """)
 
 
-def _insert_agency(conn: DuckDBPyConnection) -> None:
+def _insert_agency(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     INSERT INTO agency
     SELECT
@@ -141,12 +138,12 @@ def _insert_agency(conn: DuckDBPyConnection) -> None:
     """)
 
 
-def _create_stop_times(conn: DuckDBPyConnection) -> None:
+def _create_stop_times(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     CREATE OR REPLACE TABLE stop_times (
         trip_id VARCHAR,
-        arrival_time TIME,
-        departure_time TIME,
+        arrival_time VARCHAR,
+        departure_time VARCHAR,
         stop_id VARCHAR,
         stop_sequence INTEGER,
         pickup_type INTEGER,
@@ -156,21 +153,62 @@ def _create_stop_times(conn: DuckDBPyConnection) -> None:
     """)
 
 
-def _insert_stop_times(conn: DuckDBPyConnection) -> None:
+def _insert_stop_times(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
+    WITH
+
+    enumerated AS (
+        SELECT
+            vj.service_ref,
+            vj.vehicle_journey_id,
+            vj.journey_pattern_id,
+            (vj.departure_time::VARCHAR)::INTERVAL AS departure_time,
+            jtl.runtime,
+            jps.stop_id,
+            jps.activity,
+            jps.timing_point_status,
+            ROW_NUMBER() OVER (
+                PARTITION BY vj.journey_pattern_id
+                ORDER BY jtl.vehicle_journey_timing_link_id
+            ) AS stop_sequence,
+            s.service_code
+        FROM txc_vehicle_journeys vj
+        JOIN txc_journey_timing_links jtl
+            ON vj.vehicle_journey_id = jtl.vehicle_journey_id
+        JOIN txc_journey_pattern_sections jps
+            ON jtl.journey_pattern_timing_link_id = jps.journey_pattern_timing_link_id
+        JOIN txc_services s ON vj.service_ref = s.service_code
+    ),
+
+    -- TODO: this is producing very wrong times
+    with_time AS (
+        SELECT
+            *,
+            departure_time + (COALESCE(SUM(epoch(runtime)) OVER (
+                PARTITION BY journey_pattern_id
+                ORDER BY stop_sequence ASC
+                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+            ), 0)::BIGINT * INTERVAL '1 second') AS stop_time
+        FROM enumerated
+    ),
+
+    with_formatted_time AS (
+        SELECT
+            *,
+            format('{:02d}:{:02d}:{:02d}',
+                hour(stop_time),
+                minute(stop_time),
+                second(stop_time) % 60
+            ) as stop_time_formatted
+        FROM with_time
+    )
+
     INSERT INTO stop_times
     SELECT
-        concat(service_ref, ':', journey_pattern_id) AS trip_id,
-        departure_time + (COALESCE(SUM(epoch(runtime)) OVER (
-            PARTITION BY journey_pattern_id
-            ORDER BY stop_sequence ASC
-            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-        ), 0)::BIGINT * INTERVAL '1 second') AS arrival_time,
-        departure_time + (COALESCE(SUM(epoch(runtime)) OVER (
-            PARTITION BY journey_pattern_id
-            ORDER BY stop_sequence ASC
-            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-        ), 0)::BIGINT * INTERVAL '1 second') AS departure_time,
+        (service_code || ':' || vehicle_journey_id || ':' || journey_pattern_id)
+            AS trip_id,
+        stop_time_formatted as arrival_time,
+        stop_time_formatted as departure_time,
         stop_id,
         stop_sequence,
         CASE WHEN activity IN ('pickUp', 'pickUpAndSetDown')
@@ -185,32 +223,14 @@ def _insert_stop_times(conn: DuckDBPyConnection) -> None:
             THEN 1 -- exact
             ELSE 0 -- approximate
         END AS timepoint_type
-    FROM (
-        SELECT
-            vj.service_ref,
-            vj.journey_pattern_id,
-            vj.departure_time,
-            jtl.runtime,
-            jps.stop_id,
-            jps.activity,
-            jps.timing_point_status,
-            ROW_NUMBER() OVER (
-                PARTITION BY vj.journey_pattern_id
-                ORDER BY jtl.vehicle_journey_timing_link_id
-            ) AS stop_sequence
-        FROM txc_vehicle_journeys vj
-        JOIN txc_journey_timing_links jtl
-            ON vj.vehicle_journey_id = jtl.vehicle_journey_id
-        JOIN txc_journey_pattern_sections jps
-            ON jtl.journey_pattern_timing_link_id = jps.journey_pattern_timing_link_id
-    )
+    FROM with_formatted_time
     """)
 
 
-def _create_calendar(conn: DuckDBPyConnection) -> None:
+def _create_calendar(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     CREATE OR REPLACE TABLE calendar (
-        service_id VARCHAR NOT NULL,
+        service_id VARCHAR PRIMARY KEY,
         monday INTEGER NOT NULL,
         tuesday INTEGER NOT NULL,
         wednesday INTEGER NOT NULL,
@@ -224,7 +244,7 @@ def _create_calendar(conn: DuckDBPyConnection) -> None:
     """)
 
 
-def _insert_calendar(conn: DuckDBPyConnection) -> None:
+def _insert_calendar(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     INSERT INTO calendar
     SELECT
@@ -247,14 +267,13 @@ def _insert_calendar(conn: DuckDBPyConnection) -> None:
             vj.operation_days AS operation_days,
             s.start_date AS start_date,
             s.end_date AS end_date
-        FROM txc_services s
-        JOIN txc_vehicle_journeys vj
-        ON s.service_code = vj.service_ref
+        FROM txc_vehicle_journeys vj
+        JOIN txc_services s ON vj.service_ref = s.service_code
     )
     """)
 
 
-def load_bank_holiday_map(conn: DuckDBPyConnection) -> None:
+def load_bank_holiday_map(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     CREATE OR REPLACE TABLE bank_holiday_map (
         key VARCHAR PRIMARY KEY,
@@ -277,7 +296,7 @@ def load_bank_holiday_map(conn: DuckDBPyConnection) -> None:
     """)
 
 
-def _create_calendar_dates(conn: DuckDBPyConnection) -> None:
+def _create_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     CREATE OR REPLACE TABLE calendar_dates (
         service_id VARCHAR,
@@ -287,7 +306,7 @@ def _create_calendar_dates(conn: DuckDBPyConnection) -> None:
     """)
 
 
-def _insert_calendar_dates(conn: DuckDBPyConnection) -> None:
+def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     WITH
 
@@ -359,7 +378,7 @@ def _insert_calendar_dates(conn: DuckDBPyConnection) -> None:
     """)
 
 
-def _create_trips(conn: DuckDBPyConnection) -> None:
+def _create_trips(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     CREATE OR REPLACE TABLE trips (
         trip_id VARCHAR PRIMARY KEY,
@@ -372,35 +391,46 @@ def _create_trips(conn: DuckDBPyConnection) -> None:
     """)
 
 
-def _insert_trips(conn: DuckDBPyConnection) -> None:
+def _insert_trips(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     INSERT INTO trips
     SELECT
-        (service_code || ':' || journey_pattern_id) AS trip_id,
-        line_id as route_id,
-        service_code as service_id,
-        trip_headsign,
-        description AS trip_short_name,
+        (s.service_code || ':' || vj.vehicle_journey_id || ':' || jp.journey_pattern_id)
+            AS trip_id,
+        l.line_id as route_id,
+        (s.service_code || ':' || vj.vehicle_journey_id) as service_id,
+        CASE WHEN direction_id = 'inbound'
+            THEN s.origin
+            ELSE s.destination
+        END AS trip_headsign,
+        CASE WHEN direction_id = 'inbound'
+            THEN l.inbound_description
+            ELSE l.outbound_description
+        END AS trip_short_name,
         CASE WHEN direction_id = 'inbound' THEN 1 ELSE 0 END
-    FROM txc_services
+    FROM txc_journey_patterns jp
+    JOIN txc_vehicle_journeys vj ON vj.journey_pattern_id = jp.journey_pattern_id
+    JOIN txc_services s ON vj.service_ref = s.service_code
+    JOIN txc_lines l ON vj.service_ref = l.service_code
     """)
 
 
 @contextlib.contextmanager
 def _register_with_duckdb(
-    txc: Timetable, conn: DuckDBPyConnection
+    txc: Timetable, conn: duckdb.DuckDBPyConnection
 ) -> Generator[None, None, None]:
     fields = [f.name for f in dataclasses.fields(txc) if f.name != "metadata"]
     for field in fields:
         conn.register(f"txc_{field}", getattr(txc, field))
 
-    yield
+    try:
+        yield
+    finally:
+        for field in fields:
+            conn.unregister(f"txc_{field}")
 
-    for field in fields:
-        conn.unregister(f"txc_{field}")
 
-
-def _insert_txc_file(path: Path, conn: DuckDBPyConnection) -> None:
+def _insert_txc_file(path: Path, conn: duckdb.DuckDBPyConnection) -> None:
     txc = Timetable.from_file(path)
 
     with _register_with_duckdb(txc, conn):
