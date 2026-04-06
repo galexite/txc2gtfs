@@ -53,28 +53,6 @@ def _register_parser(elem_name: str) -> Callable[[_ParserFn], _ParserFn]:
 def _parse_journey_pattern_sections(
     sections: etree.Element, metadata: Metadata
 ) -> _ParseResult:
-    def create_row(
-        journey_pattern_section_id: str,
-        journey_pattern_timing_link_id: str,
-        point: etree.Element,
-    ):
-        stop_id = point.findtext("./txc:StopPointRef", None, NS)
-        assert stop_id
-        activity = point.findtext("./txc:Activity", None, NS)
-        assert activity
-        timing_point_status = point.findtext("./txc:TimingStatus", None, NS)
-        assert timing_point_status
-        fare_stage_number = point.findtext("./txc:FareStageNumber", None, NS)
-        assert fare_stage_number
-
-        return {
-            "journey_pattern_section_id": journey_pattern_section_id,
-            "journey_pattern_timing_link_id": journey_pattern_timing_link_id,
-            "stop_id": stop_id,
-            "activity": activity,
-            "timing_point_status": timing_point_status,
-            "fare_stage_number": int(fare_stage_number),
-        }
 
     def generate_rows():
         section_qname = etree.QName(NS["txc"], "JourneyPatternSection")
@@ -83,35 +61,56 @@ def _parse_journey_pattern_sections(
         for section in sections.iterchildren(section_qname):
             journey_pattern_section_id = section.get("id")
             assert journey_pattern_section_id
-            last_link: etree.Element | None = None
-            for link in section.iterchildren(link_qname):
-                if last_link is not None:
-                    last_link.clear()
-                from_point = link.find("./txc:From", NS)
-                assert from_point is not None
-                journey_pattern_timing_link_id = link.get("id")
+            for timing_link in section.iterchildren(link_qname):
+                journey_pattern_timing_link_id = timing_link.get("id")
                 assert journey_pattern_timing_link_id is not None
 
-                yield create_row(
-                    journey_pattern_section_id,
-                    journey_pattern_timing_link_id,
-                    from_point,
-                )
+                from_ = timing_link.find("txc:From", NS)
+                assert from_ is not None
+                from_sequence_number = from_.get("SequenceNumber")
+                assert from_sequence_number is not None
+                from_sequence_number = int(from_sequence_number)
+                from_stop_point_ref = from_.findtext("txc:StopPointRef", None, NS)
+                from_activity = from_.findtext("txc:Activity", None, NS)
+                assert from_activity
+                from_timing_status = from_.findtext("txc:TimingStatus", None, NS)
+                assert from_timing_status
+                from_fare_stage_number = from_.findtext("txc:FareStageNumber", None, NS)
+                assert from_fare_stage_number
 
-                last_link = link
+                to_ = timing_link.find("txc:To", NS)
+                assert to_ is not None
+                to_sequence_number = to_.get("SequenceNumber")
+                assert to_sequence_number is not None
+                to_sequence_number = int(to_sequence_number)
+                to_stop_point_ref = to_.findtext("txc:StopPointRef", None, NS)
+                to_activity = to_.findtext("txc:Activity", None, NS)
+                assert to_activity
+                to_timing_status = to_.findtext("txc:TimingStatus", None, NS)
+                assert to_timing_status
+                to_fare_stage_number = to_.findtext("txc:FareStageNumber", None, NS)
+                assert to_fare_stage_number
 
-            # For the last stop, we'll take the 'To' segment.
-            assert last_link is not None
-            to_point = last_link.find("./txc:To", NS)
-            assert to_point is not None
-            journey_pattern_timing_link_id = last_link.get("id")
-            assert journey_pattern_timing_link_id
+                route_link_ref = timing_link.findtext("txc:RouteLinkRef", None, NS)
 
-            yield create_row(
-                journey_pattern_section_id, journey_pattern_timing_link_id, to_point
-            )
+                yield {
+                    "journey_pattern_section_id": journey_pattern_section_id,
+                    "journey_pattern_timing_link_id": journey_pattern_timing_link_id,
+                    "from_sequence_number": from_sequence_number,
+                    "from_stop_point_ref": from_stop_point_ref,
+                    "from_activity": from_activity,
+                    "from_timing_status": from_timing_status,
+                    "from_fare_stage_number": from_fare_stage_number,
+                    "to_sequence_number": to_sequence_number,
+                    "to_stop_point_ref": to_stop_point_ref,
+                    "to_activity": to_activity,
+                    "to_timing_status": to_timing_status,
+                    "to_fare_stage_number": to_fare_stage_number,
+                    "route_link_ref": route_link_ref,
+                }
 
-            last_link.clear()
+                timing_link.clear()
+
             section.clear()
 
     df = pd.DataFrame(generate_rows())
@@ -325,6 +324,7 @@ def _parse_direction(direction: str) -> Literal[0] | Literal[1]:
 @_register_parser("Services")
 def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult:
     service_qname = etree.QName(NS["txc"], "Service")
+    section_refs_qname = etree.QName(NS["txc"], "JourneyPatternSectionRefs")
 
     def generate_service_rows():
         for service in services.iterchildren(service_qname):
@@ -401,12 +401,13 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
                     journey_pattern_id = pattern.get("id")
 
                     # Section reference
-                    section_ref = pattern.findtext(
-                        "./txc:JourneyPatternSectionRefs", None, NS
-                    )
+                    section_refs = [
+                        el.text for el in pattern.iterchildren(section_refs_qname)
+                    ]
+                    assert all(sr is not None for sr in section_refs)
 
                     # Direction
-                    direction = pattern.findtext("./txc:Direction", None, NS)
+                    direction = pattern.findtext("txc:Direction", None, NS)
                     assert direction
 
                     # Route Reference
@@ -416,7 +417,7 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
                         "service_code": service_code,
                         "line_id": line_id,
                         "journey_pattern_id": journey_pattern_id,
-                        "journey_pattern_section_id": section_ref,
+                        "journey_pattern_section_ids": section_refs,
                         "direction_id": direction,
                         "route_id": route_ref,
                     }

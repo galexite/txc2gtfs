@@ -157,55 +157,95 @@ def _insert_stop_times(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     WITH
 
-    enumerated AS (
+    base AS (
         SELECT
             vj.service_ref,
             vj.vehicle_journey_id,
             vj.journey_pattern_id,
-            (vj.departure_time::VARCHAR)::INTERVAL AS departure_time,
-            jtl.runtime,
-            jps.stop_id,
-            jps.activity,
-            jps.timing_point_status,
-            ROW_NUMBER() OVER (
-                PARTITION BY vj.journey_pattern_id
-                ORDER BY jtl.vehicle_journey_timing_link_id
-            ) AS stop_sequence,
-            s.service_code
+            jps.from_stop_point_ref,
+            jps.from_activity,
+            jps.from_timing_status,
+            jps.from_sequence_number,
+            jps.to_stop_point_ref,
+            jps.to_activity,
+            jps.to_timing_status,
+            jps.to_sequence_number,
+            epoch(vj.departure_time)::UINTEGER as departure_time_s,
+            epoch(jtl.runtime)::UINTEGER as runtime_s,
+            jps.journey_pattern_section_id
         FROM txc_vehicle_journeys vj
-        JOIN txc_journey_timing_links jtl
-            ON vj.vehicle_journey_id = jtl.vehicle_journey_id
-        JOIN txc_journey_pattern_sections jps
-            ON jtl.journey_pattern_timing_link_id = jps.journey_pattern_timing_link_id
-        JOIN txc_services s ON vj.service_ref = s.service_code
+        NATURAL JOIN txc_journey_timing_links jtl
+        NATURAL JOIN txc_journey_pattern_sections jps
     ),
 
-    -- TODO: this is producing very wrong times
-    with_time AS (
+    all_points_except_last AS (
+        SELECT
+            service_ref,
+            vehicle_journey_id,
+            journey_pattern_id,
+            from_stop_point_ref AS stop_id,
+            from_activity AS activity,
+            from_timing_status AS timing_status,
+            from_sequence_number AS stop_sequence,
+            service_ref,
+            departure_time_s,
+            runtime_s
+        FROM base
+    ),
+
+    last_points AS (
+        SELECT
+            service_ref,
+            vehicle_journey_id,
+            journey_pattern_id,
+            to_stop_point_ref AS stop_id,
+            to_activity AS activity,
+            to_timing_status AS timing_status,
+            to_sequence_number AS stop_sequence,
+            service_ref,
+            departure_time_s,
+            runtime_s
+        FROM base
+        WHERE (journey_pattern_section_id, to_sequence_number) IN (
+            SELECT
+                journey_pattern_section_id,
+                MAX(to_sequence_number) AS to_sequence_number
+            FROM base
+            GROUP BY journey_pattern_section_id
+        )
+    ),
+
+    all_points AS (
         SELECT
             *,
-            departure_time + (COALESCE(SUM(epoch(runtime)) OVER (
-                PARTITION BY journey_pattern_id
-                ORDER BY stop_sequence ASC
-                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-            ), 0)::BIGINT * INTERVAL '1 second') AS stop_time
-        FROM enumerated
+            departure_time_s + coalesce(
+                SUM(runtime_s) OVER (
+                    PARTITION BY vehicle_journey_id, journey_pattern_id
+                    ORDER BY stop_sequence ASC
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                ), 0
+            ) AS stop_time
+        FROM (
+            SELECT * FROM all_points_except_last
+            UNION ALL
+            SELECT * FROM last_points
+        )
     ),
 
     with_formatted_time AS (
         SELECT
             *,
             format('{:02d}:{:02d}:{:02d}',
-                hour(stop_time),
-                minute(stop_time),
-                second(stop_time) % 60
+                (stop_time // 3600),
+                (stop_time // 60) % 60,
+                stop_time % 60
             ) as stop_time_formatted
-        FROM with_time
+        FROM all_points
     )
 
     INSERT INTO stop_times
     SELECT
-        (service_code || ':' || vehicle_journey_id || ':' || journey_pattern_id)
+        (service_ref || ':' || vehicle_journey_id || ':' || journey_pattern_id)
             AS trip_id,
         stop_time_formatted as arrival_time,
         stop_time_formatted as departure_time,
@@ -219,7 +259,7 @@ def _insert_stop_times(conn: duckdb.DuckDBPyConnection) -> None:
             THEN 0 -- regular
             ELSE 1 -- not available
         END AS drop_off_type,
-        CASE WHEN timing_point_status = 'principalTimingPoint'
+        CASE WHEN timing_status = 'principalTimingPoint'
             THEN 1 -- exact
             ELSE 0 -- approximate
         END AS timepoint_type
