@@ -1,50 +1,9 @@
 """
-Convert transXchange data format to GTFS format.
+Convert TransXChange data format to GTFS format.
 
-The TransXChange model) has seven basic concepts: Service, Registration, Operator,
-Route, StopPoint, JourneyPattern, and VehicleJourney.
-
-- A Service brings together the information about a registered bus service, and may
-  contain two types of component service: Standard or Flexible; a mix of both
-  types is allowed within a single Service.
-
-- A normal bus schedule is described by a StandardService and a Route. A Route
-  describes the physical path taken by buses on the service as a set of routelinks.
-
-- A FlexibleService describes a bus service that does not have a fixed route, but
-  only a catchment area or a few variable stops with no prescribed pattern of use.
-
-- A StandardService has one or more JourneyPattern elements to describe the common
-  logical path of traversal of the stops of the Route as a sequence of timing
-  links (see later) and one or more VehicleJourney elements, which describe
-  individual scheduled journeys by buses over the Route and JourneyPattern at a
-  specific time.
-
-- Both types of service have a registered Operator, who runs the service. Other
-  associated operator roles can also be specified.
-
-- Route, JourneyPattern and VehicleJourney follow a sequence of NaPTAN StopPoints. A
-  Route specifies in effect an ordered list of StopPoints. A JourneyPattern specifies an
-  ordered list of links between these points, giving relative times between each
-  stop; a VehicleJourney follows the same list of stops at specific absolute passing
-  times. (The detailed timing Link and elements that connect VehicleJourneys,
-  JourneyPatterns etc to StopPoints are not shown in Figure 3-1). StopPoints may be
-  grouped within StopAreas.
-
-- The StopPoints used in a JourneyPattern or Route are either declared locally or by
-  referenced to an external definition using an AnnotatedStopRef.
-
-- A Registration specifies the registration details for a service. It is mandatory
-  in the registration schema.
-
-Author
-------
-Dr. Henrikki Tenkanen, University College London
-
-License
--------
-
-MIT.
+TODO: translate from OSGeo coordinate systems
+TODO: support a JourneyPattern referencing multiple JourneyPatternSectionRefs
+TODO: feedinfo.txt
 """
 
 from __future__ import annotations
@@ -433,6 +392,7 @@ def _create_trips(conn: duckdb.DuckDBPyConnection) -> None:
         trip_headsign VARCHAR,
         trip_short_name VARCHAR,
         direction_id INTEGER,
+        shape_id VARCHAR
     )
     """)
 
@@ -453,11 +413,48 @@ def _insert_trips(conn: duckdb.DuckDBPyConnection) -> None:
             THEN l.inbound_description
             ELSE l.outbound_description
         END AS trip_short_name,
-        CASE WHEN direction_id = 'inbound' THEN 1 ELSE 0 END
+        CASE WHEN direction_id = 'inbound' THEN 1 ELSE 0 END AS direction_id,
+        jp.route_id AS shape_id
     FROM txc_journey_patterns jp
     JOIN txc_vehicle_journeys vj ON vj.journey_pattern_id = jp.journey_pattern_id
     JOIN txc_services s ON vj.service_ref = s.service_code
     JOIN txc_lines l ON vj.service_ref = l.service_code
+    """)
+
+
+def _create_shapes(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute("""
+    CREATE OR REPLACE TABLE shapes (
+        shape_id VARCHAR,
+        shape_pt_lat DECIMAL(8, 6),
+        shape_pt_lon DECIMAL(9, 6),
+        shape_pt_sequence UINTEGER,
+        shape_dist_traveled UINTEGER
+    )
+    """)
+
+
+def _insert_shapes(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute("""
+    INSERT INTO shapes
+    SELECT
+        r.route_id AS shape_id,
+        rl.latitude AS shape_pt_lat,
+        rl.longitude AS shape_pt_lon,
+        ROW_NUMBER() OVER (
+            PARTITION BY r.route_id
+            ORDER BY rs.route_link_seq_num, rl.location_seq_num ASC
+        ) AS shape_pt_sequence,
+        coalesce(
+            SUM(rs.route_link_distance) OVER (
+                PARTITION BY r.route_id
+                ORDER BY rs.route_link_seq_num, rl.location_seq_num ASC
+                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+            ), 0
+        ) AS shape_dist_traveled
+    FROM txc_routes r
+    NATURAL JOIN txc_route_sections rs
+    NATURAL JOIN txc_route_locations rl
     """)
 
 
@@ -480,20 +477,22 @@ def _insert_txc_file(path: Path, conn: duckdb.DuckDBPyConnection) -> None:
     txc = Timetable.from_file(path)
 
     with _register_with_duckdb(txc, conn):
-        _insert_stops(conn)
-        _insert_stop_times(conn)
-        _insert_trips(conn)
-        _insert_calendar(conn)
-        _insert_calendar_dates(conn)
-        _insert_routes(conn)
         _insert_agency(conn)
+        _insert_calendar_dates(conn)
+        _insert_calendar(conn)
+        _insert_routes(conn)
+        _insert_shapes(conn)
+        _insert_stop_times(conn)
+        _insert_stops(conn)
+        _insert_trips(conn)
 
 
 GTFS_FILES = [
     "agency.txt",
-    "calendar.txt",
     "calendar_dates.txt",
+    "calendar.txt",
     "routes.txt",
+    "shapes.txt",
     "stop_times.txt",
     "stops.txt",
     "trips.txt",
@@ -511,13 +510,14 @@ def convert(
         output: Path to the output GTFS zip file to generate
     """
     with duckdb.connect() as conn:
-        _create_stops(conn)
-        _create_stop_times(conn)
-        _create_trips(conn)
-        _create_calendar(conn)
-        _create_calendar_dates(conn)
-        _create_routes(conn)
         _create_agency(conn)
+        _create_calendar_dates(conn)
+        _create_calendar(conn)
+        _create_routes(conn)
+        _create_shapes(conn)
+        _create_stop_times(conn)
+        _create_stops(conn)
+        _create_trips(conn)
 
         load_bank_holidays(conn)
         load_bank_holiday_map(conn)
