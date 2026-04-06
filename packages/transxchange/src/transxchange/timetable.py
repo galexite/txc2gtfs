@@ -164,12 +164,12 @@ def _parse_vehicle_journeys(
             assert vehicle_journey_id
 
             # Parse weekday operation times from VehicleJourney
-            operation_days = _parse_days(
+            days_of_week = _parse_days(
                 journey, "./txc:OperatingProfile/txc:RegularDayType/txc:DaysOfWeek/*"
             )
 
             # Parse calendar dates (exceptions in operation)
-            non_operative_days = _parse_days(
+            days_of_non_operation = _parse_days(
                 journey,
                 "./txc:OperatingProfile/txc:BankHolidayOperation/txc:DaysOfNonOperation/*",
             )
@@ -183,8 +183,8 @@ def _parse_vehicle_journeys(
                 "line_ref": line_ref,
                 "vehicle_journey_id": vehicle_journey_id,
                 "journey_pattern_id": journey_pattern_id,
-                "operation_days": operation_days,
-                "non_operative_days": non_operative_days,
+                "days_of_week": days_of_week,
+                "days_of_non_operation": days_of_non_operation,
                 "departure_time": departure_time,
             }
 

@@ -289,22 +289,22 @@ def _insert_calendar(conn: duckdb.DuckDBPyConnection) -> None:
     INSERT INTO calendar
     SELECT
         service_id,
-        'Monday' IN operation_days AS monday,
-        'Tuesday' IN operation_days AS tuesday,
-        'Wednesday' IN operation_days AS wednesday,
-        'Thursday' IN operation_days AS thursday,
-        'Friday' IN operation_days AS friday,
-        'Saturday' IN operation_days OR 'Weekend' IN operation_days AS saturday,
-        'Sunday' IN operation_days OR 'Weekend' IN operation_days AS sunday,
+        'Monday' IN days_of_week AS monday,
+        'Tuesday' IN days_of_week AS tuesday,
+        'Wednesday' IN days_of_week AS wednesday,
+        'Thursday' IN days_of_week AS thursday,
+        'Friday' IN days_of_week AS friday,
+        'Saturday' IN days_of_week OR 'Weekend' IN days_of_week AS saturday,
+        'Sunday' IN days_of_week OR 'Weekend' IN days_of_week AS sunday,
         start_date,
         CASE WHEN end_date IS NULL
-            THEN start_date + INTERVAL '5 years'
+            THEN start_date + INTERVAL 5 YEARS
             ELSE end_date
         END AS end_date
     FROM (
         SELECT
             (s.service_code || ':' || vj.vehicle_journey_id) AS service_id,
-            vj.operation_days AS operation_days,
+            vj.days_of_week AS days_of_week,
             s.start_date AS start_date,
             s.end_date AS end_date
         FROM txc_vehicle_journeys vj
@@ -354,8 +354,8 @@ def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
         SELECT
             (s.service_code || ':' || vj.vehicle_journey_id) AS service_id,
             s.start_date,
-            s.end_date,
-            vj.non_operative_days,
+            coalesce(s.end_date, s.start_date + INTERVAL 5 YEARS) AS end_date,
+            vj.days_of_week,
             CASE nod.key
                 WHEN 'NewYearsDay'    THEN MAKE_DATE(YEAR(d.date), 1,  1)
                 WHEN 'Jan2ndScotland' THEN MAKE_DATE(YEAR(d.date), 1,  2)
@@ -365,12 +365,15 @@ def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
             END AS holiday_date
         FROM txc_vehicle_journeys vj
         JOIN txc_services s ON s.service_code = vj.service_ref
-        CROSS JOIN UNNEST(vj.non_operative_days) AS nod(key)
+        CROSS JOIN UNNEST(vj.days_of_non_operation) AS nod(key)
         CROSS JOIN (
             SELECT DISTINCT DATE_TRUNC('year', range_date) AS year_start
             FROM GENERATE_SERIES(
                 (SELECT MIN(start_date) FROM txc_services),
-                (SELECT MAX(end_date)   FROM txc_services),
+                coalesce(
+                    (SELECT MAX(end_date) FROM txc_services),
+                    ((SELECT MAX(start_date) FROM txc_services) + INTERVAL 5 YEARS)
+                ),
                 INTERVAL '1 day'
             ) AS t(range_date)
         ) AS years
@@ -387,24 +390,26 @@ def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
             (s.service_code || ':' || vj.vehicle_journey_id) AS service_id,
             s.start_date,
             s.end_date,
+            vj.days_of_week,
             bh.date AS holiday_date
         FROM txc_vehicle_journeys vj
-        CROSS JOIN UNNEST(vj.non_operative_days) AS nod(key)
+        CROSS JOIN UNNEST(vj.days_of_non_operation) AS nod(key)
         JOIN bank_holiday_map bhm ON bhm.key = nod.key
         JOIN bank_holidays bh     ON bh.title = bhm.value
-        JOIN txc_services s       ON s.service_code = vj.service_ref
-        WHERE bh.date BETWEEN s.start_date AND s.end_date
+        JOIN txc_services s       ON vj.service_ref = s.service_code
+        WHERE bh.date BETWEEN
+            s.start_date AND coalesce(s.end_date, s.start_date + INTERVAL 5 YEARS)
     ),
 
     all_holiday_dates AS (
-        SELECT service_id, holiday_date
+        SELECT service_id, holiday_date, days_of_week
         FROM fixed_holiday_dates
         WHERE holiday_date IS NOT NULL
         AND holiday_date BETWEEN start_date AND end_date
 
         UNION ALL
 
-        SELECT service_id, holiday_date
+        SELECT service_id, holiday_date, days_of_week
         FROM variable_holiday_dates
     )
 
@@ -414,6 +419,7 @@ def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
         holiday_date AS date,
         2 as exception_type
     FROM all_holiday_dates
+    WHERE dayname(holiday_date) IN days_of_week
     ORDER BY holiday_date;
     """)
 
