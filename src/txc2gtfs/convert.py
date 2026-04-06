@@ -4,6 +4,7 @@ Convert TransXChange data format to GTFS format.
 TODO: translate from OSGeo coordinate systems
 TODO: support a JourneyPattern referencing multiple JourneyPatternSectionRefs
 TODO: feedinfo.txt
+TODO: check column types
 """
 
 from __future__ import annotations
