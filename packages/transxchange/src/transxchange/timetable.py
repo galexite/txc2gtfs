@@ -379,13 +379,13 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
                     "./txc:InboundDescription/txc:Description", None, NS
                 )
 
-            yield {
-                "service_code": service_code,
-                "line_id": line_id,
-                "line_name": line_name,
-                "outbound_description": outbound_description,
-                "inbound_description": inbound_description,
-            }
+                yield {
+                    "service_code": service_code,
+                    "line_id": line_id,
+                    "line_name": line_name,
+                    "outbound_description": outbound_description,
+                    "inbound_description": inbound_description,
+                }
 
     def generate_journey_pattern_rows():
         for service in services.iterchildren(service_qname):
