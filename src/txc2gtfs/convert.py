@@ -119,7 +119,7 @@ def _insert_stop_times(conn: duckdb.DuckDBPyConnection) -> None:
 
     base AS (
         SELECT
-            vj.service_ref,
+            vj.line_id,
             vj.vehicle_journey_id,
             vj.journey_pattern_id,
             jps.from_stop_point_ref,
@@ -140,14 +140,13 @@ def _insert_stop_times(conn: duckdb.DuckDBPyConnection) -> None:
 
     all_points_except_last AS (
         SELECT
-            service_ref,
+            line_id,
             vehicle_journey_id,
             journey_pattern_id,
             from_stop_point_ref AS stop_id,
             from_activity AS activity,
             from_timing_status AS timing_status,
             from_sequence_number AS stop_sequence,
-            service_ref,
             departure_time_s,
             runtime_s
         FROM base
@@ -155,14 +154,13 @@ def _insert_stop_times(conn: duckdb.DuckDBPyConnection) -> None:
 
     last_points AS (
         SELECT
-            service_ref,
+            line_id,
             vehicle_journey_id,
             journey_pattern_id,
             to_stop_point_ref AS stop_id,
             to_activity AS activity,
             to_timing_status AS timing_status,
             to_sequence_number AS stop_sequence,
-            service_ref,
             departure_time_s,
             runtime_s
         FROM base
@@ -205,7 +203,7 @@ def _insert_stop_times(conn: duckdb.DuckDBPyConnection) -> None:
 
     INSERT INTO stop_times
     SELECT
-        (service_ref || ':' || vehicle_journey_id || ':' || journey_pattern_id)
+        (line_id || ':' || vehicle_journey_id || ':' || journey_pattern_id)
             AS trip_id,
         stop_time_formatted as arrival_time,
         stop_time_formatted as departure_time,
@@ -268,7 +266,7 @@ def _insert_calendar(conn: duckdb.DuckDBPyConnection) -> None:
             s.start_date AS start_date,
             s.end_date AS end_date
         FROM txc_vehicle_journeys vj
-        JOIN txc_services s ON vj.service_ref = s.service_code
+        JOIN txc_services s ON vj.service_code = s.service_code
     )
     """)
 
@@ -324,7 +322,7 @@ def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
                 WHEN 'BoxingDay'      THEN MAKE_DATE(YEAR(d.date), 12, 26)
             END AS holiday_date
         FROM txc_vehicle_journeys vj
-        JOIN txc_services s ON s.service_code = vj.service_ref
+        JOIN txc_services s ON s.service_code = vj.service_code
         CROSS JOIN UNNEST(vj.days_of_non_operation) AS nod(key)
         CROSS JOIN (
             SELECT DISTINCT DATE_TRUNC('year', range_date) AS year_start
@@ -356,7 +354,7 @@ def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
         CROSS JOIN UNNEST(vj.days_of_non_operation) AS nod(key)
         JOIN bank_holiday_map bhm ON bhm.key = nod.key
         JOIN bank_holidays bh     ON bh.title = bhm.value
-        JOIN txc_services s       ON vj.service_ref = s.service_code
+        JOIN txc_services s       ON vj.service_code = s.service_code
         WHERE bh.date BETWEEN
             s.start_date AND coalesce(s.end_date, s.start_date + INTERVAL 5 YEARS)
     ),
@@ -402,7 +400,7 @@ def _insert_trips(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
     INSERT INTO trips
     SELECT
-        (s.service_code || ':' || vj.vehicle_journey_id || ':' || jp.journey_pattern_id)
+        (l.line_id || ':' || vj.vehicle_journey_id || ':' || jp.journey_pattern_id)
             AS trip_id,
         l.line_id as route_id,
         (s.service_code || ':' || vj.vehicle_journey_id) as service_id,
@@ -418,8 +416,8 @@ def _insert_trips(conn: duckdb.DuckDBPyConnection) -> None:
         jp.route_id AS shape_id
     FROM txc_journey_patterns jp
     JOIN txc_vehicle_journeys vj ON vj.journey_pattern_id = jp.journey_pattern_id
-    JOIN txc_services s ON vj.service_ref = s.service_code
-    JOIN txc_lines l ON vj.service_ref = l.service_code
+    JOIN txc_services s ON vj.service_code = s.service_code
+    JOIN txc_lines l ON vj.service_code = l.service_code
     """)
 
 

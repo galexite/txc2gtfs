@@ -149,16 +149,16 @@ def _parse_vehicle_journeys(
 
     def generate_vehicle_journey_rows():
         for journey in journeys.iterchildren(journey_qname):
-            service_ref = journey.findtext("txc:ServiceRef", None, NS)
+            service_code = journey.findtext("txc:ServiceRef", None, NS)
             # Get line reference
-            line_ref = journey.findtext("txc:LineRef", None, NS)
-            assert line_ref
+            line_id = journey.findtext("txc:LineRef", None, NS)
+            assert line_id
 
             # Journey pattern reference
             journey_pattern_id = journey.findtext("txc:JourneyPatternRef", None, NS)
             assert journey_pattern_id
 
-            # Vehicle journey id ==> will be used to generate service_id (identifies
+            # Vehicle journey id ==> will be used to generate service_code (identifies
             # operative weekdays)
             vehicle_journey_id = journey.findtext("txc:VehicleJourneyCode", None, NS)
             assert vehicle_journey_id
@@ -179,8 +179,8 @@ def _parse_vehicle_journeys(
             departure_time = time.fromisoformat(departure_time)
 
             yield {
-                "service_ref": service_ref,
-                "line_ref": line_ref,
+                "service_code": service_code,
+                "line_id": line_id,
                 "vehicle_journey_id": vehicle_journey_id,
                 "journey_pattern_id": journey_pattern_id,
                 "days_of_week": days_of_week,
@@ -192,11 +192,11 @@ def _parse_vehicle_journeys(
 
     def generate_timing_link_rows():
         for journey in journeys.iterchildren(journey_qname):
-            service_ref = journey.findtext("txc:ServiceRef", None, NS)
-            assert service_ref
+            service_code = journey.findtext("txc:ServiceRef", None, NS)
+            assert service_code
             # Get line reference
-            line_ref = journey.findtext("txc:LineRef", None, NS)
-            assert line_ref
+            line_id = journey.findtext("txc:LineRef", None, NS)
+            assert line_id
 
             vehicle_journey_id = journey.findtext("txc:VehicleJourneyCode", None, NS)
             assert vehicle_journey_id
@@ -224,8 +224,8 @@ def _parse_vehicle_journeys(
                     runtime_duration = timedelta()
 
                 yield {
-                    "service_ref": service_ref,
-                    "line_ref": line_ref,
+                    "service_code": service_code,
+                    "line_id": line_id,
                     "vehicle_journey_id": vehicle_journey_id,
                     "vehicle_journey_timing_link_id": vehicle_journey_timing_link_id,
                     "journey_pattern_timing_link_id": journey_pattern_timing_link_id,
