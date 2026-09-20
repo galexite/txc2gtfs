@@ -391,40 +391,34 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
         for service in services.iterchildren(service_qname):
             service_code = service.findtext("txc:ServiceCode", None, NS)
 
-            for line in service.iterfind("./txc:Lines/txc:Line", NS):
-                line_id = line.get("id")
-                assert line_id
-                for pattern in service.iterfind(
-                    "./txc:StandardService/txc:JourneyPattern", NS
-                ):
-                    # Journey pattern id
-                    journey_pattern_id = pattern.get("id")
+            for pattern in service.iterfind(
+                "./txc:StandardService/txc:JourneyPattern", NS
+            ):
+                # Journey pattern id
+                journey_pattern_id = pattern.get("id")
 
-                    # Section reference
-                    section_refs = [
-                        el.text for el in pattern.iterchildren(section_refs_qname)
-                    ]
-                    assert all(sr is not None for sr in section_refs)
+                # Section reference
+                section_refs = [
+                    el.text for el in pattern.iterchildren(section_refs_qname)
+                ]
+                assert all(sr is not None for sr in section_refs)
 
-                    # Direction
-                    direction = pattern.findtext("txc:Direction", None, NS)
-                    assert direction
+                # Direction
+                direction = pattern.findtext("txc:Direction", None, NS)
+                assert direction
 
-                    # Route Reference
-                    route_ref = pattern.findtext("txc:RouteRef", None, NS)
+                # Route Reference
+                route_ref = pattern.findtext("txc:RouteRef", None, NS)
 
-                    yield {
-                        "service_code": service_code,
-                        "line_id": line_id,
-                        "journey_pattern_id": journey_pattern_id,
-                        "journey_pattern_section_ids": section_refs,
-                        "direction_id": direction,
-                        "route_id": route_ref,
-                    }
+                yield {
+                    "service_code": service_code,
+                    "journey_pattern_id": journey_pattern_id,
+                    "journey_pattern_section_ids": section_refs,
+                    "direction_id": direction,
+                    "route_id": route_ref,
+                }
 
-                    pattern.clear()
-
-                line.clear()
+                pattern.clear()
 
             service.clear()
 
