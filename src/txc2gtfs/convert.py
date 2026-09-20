@@ -415,9 +415,9 @@ def _insert_trips(conn: duckdb.DuckDBPyConnection) -> None:
         CASE WHEN direction_id = 'inbound' THEN 1 ELSE 0 END AS direction_id,
         jp.route_id AS shape_id
     FROM txc_journey_patterns jp
-    JOIN txc_vehicle_journeys vj ON vj.journey_pattern_id = jp.journey_pattern_id
-    JOIN txc_services s ON vj.service_code = s.service_code
-    JOIN txc_lines l ON vj.service_code = l.service_code
+    NATURAL JOIN txc_vehicle_journeys vj
+    NATURAL JOIN txc_services s
+    NATURAL JOIN txc_lines l
     """)
 
 
