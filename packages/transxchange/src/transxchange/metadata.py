@@ -14,6 +14,13 @@ class Modification(StrEnum):
     DELTA = "delta"
     ARCHIVE = "archive"
 
+    @classmethod
+    def get(cls, value: str) -> Modification:
+        try:
+            return next(m for m in cls.__members__.values() if m.value == value)
+        except StopIteration:
+            raise KeyError(value)
+
 
 @dataclasses.dataclass(slots=True, frozen=True)
 class Metadata:
@@ -37,7 +44,7 @@ class Metadata:
         creation_date = datetime.fromisoformat(creation_date)
         modification = elem.get("Modification")
         assert modification is not None
-        modification = Modification[modification]
+        modification = Modification.get(modification)
         modification_date = elem.get("ModificationDateTime")
         if modification_date is not None:
             modification_date = datetime.fromisoformat(modification_date)
