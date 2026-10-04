@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
@@ -149,7 +151,7 @@ def _parse_vehicle_journeys(
 
     def generate_vehicle_journey_rows():
         for journey in journeys.iterchildren(journey_qname):
-            service_code = journey.findtext("txc:ServiceRef", None, NS)
+            service_id = journey.findtext("txc:ServiceRef", None, NS)
             # Get line reference
             line_id = journey.findtext("txc:LineRef", None, NS)
             assert line_id
@@ -158,8 +160,6 @@ def _parse_vehicle_journeys(
             journey_pattern_id = journey.findtext("txc:JourneyPatternRef", None, NS)
             assert journey_pattern_id
 
-            # Vehicle journey id ==> will be used to generate service_code (identifies
-            # operative weekdays)
             vehicle_journey_id = journey.findtext("txc:VehicleJourneyCode", None, NS)
             assert vehicle_journey_id
 
@@ -179,7 +179,7 @@ def _parse_vehicle_journeys(
             departure_time = time.fromisoformat(departure_time)
 
             yield {
-                "service_code": service_code,
+                "service_id": service_id,
                 "line_id": line_id,
                 "vehicle_journey_id": vehicle_journey_id,
                 "journey_pattern_id": journey_pattern_id,
@@ -192,8 +192,8 @@ def _parse_vehicle_journeys(
 
     def generate_timing_link_rows():
         for journey in journeys.iterchildren(journey_qname):
-            service_code = journey.findtext("txc:ServiceRef", None, NS)
-            assert service_code
+            service_id = journey.findtext("txc:ServiceRef", None, NS)
+            assert service_id
             # Get line reference
             line_id = journey.findtext("txc:LineRef", None, NS)
             assert line_id
@@ -224,7 +224,7 @@ def _parse_vehicle_journeys(
                     runtime_duration = timedelta()
 
                 yield {
-                    "service_code": service_code,
+                    "service_id": service_id,
                     "line_id": line_id,
                     "vehicle_journey_id": vehicle_journey_id,
                     "vehicle_journey_timing_link_id": vehicle_journey_timing_link_id,
@@ -486,7 +486,7 @@ def _parse_route_sections(
 
                 loc.clear()
 
-            loc.clear()
+            link.clear()
 
     route_locations_df = pd.DataFrame(generate_route_track_rows())
 
@@ -496,20 +496,20 @@ def _parse_route_sections(
 @dataclass(slots=True, frozen=True)
 class Timetable:
     metadata: Metadata
-    services: pd.DataFrame | None = None
-    lines: pd.DataFrame | None = None
-    journey_patterns: pd.DataFrame | None = None
-    journey_pattern_sections: pd.DataFrame | None = None
-    journey_timing_links: pd.DataFrame | None = None
-    vehicle_journeys: pd.DataFrame | None = None
-    routes: pd.DataFrame | None = None
-    stop_points: pd.DataFrame | None = None
-    operators: pd.DataFrame | None = None
-    route_sections: pd.DataFrame | None = None
-    route_locations: pd.DataFrame | None = None
+    services: pd.DataFrame
+    lines: pd.DataFrame
+    journey_patterns: pd.DataFrame
+    journey_pattern_sections: pd.DataFrame
+    journey_timing_links: pd.DataFrame
+    vehicle_journeys: pd.DataFrame
+    routes: pd.DataFrame
+    stop_points: pd.DataFrame
+    operators: pd.DataFrame
+    route_sections: pd.DataFrame
+    route_locations: pd.DataFrame
 
     @staticmethod
-    def from_file(path: StrPath) -> "Timetable":
+    def from_file(path: StrPath) -> Timetable:
         """Load a TransXChange timetable XML file at the specified path.
 
         Args:
@@ -548,5 +548,9 @@ class Timetable:
             elem.clear()
 
         assert "metadata" in kwargs
+
+        for field in fields(Timetable):
+            if field.type is pd.DataFrame and field.name not in kwargs:
+                kwargs[field.name] = pd.DataFrame()
 
         return Timetable(**kwargs)
