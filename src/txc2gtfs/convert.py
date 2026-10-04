@@ -261,12 +261,12 @@ def _insert_calendar(conn: duckdb.DuckDBPyConnection) -> None:
         END AS end_date
     FROM (
         SELECT
-            (s.service_code || ':' || vj.vehicle_journey_id) AS service_id,
+            (s.service_id || ':' || vj.vehicle_journey_id) AS service_id,
             vj.days_of_week AS days_of_week,
             s.start_date AS start_date,
             s.end_date AS end_date
         FROM txc_vehicle_journeys vj
-        JOIN txc_services s ON vj.service_code = s.service_code
+        JOIN txc_services s ON vj.service_id = s.service_id
     )
     """)
 
@@ -310,7 +310,7 @@ def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
 
     fixed_holiday_dates AS (
         SELECT
-            (s.service_code || ':' || vj.vehicle_journey_id) AS service_id,
+            (s.service_id || ':' || vj.vehicle_journey_id) AS service_id,
             s.start_date,
             coalesce(s.end_date, s.start_date + INTERVAL 5 YEARS) AS end_date,
             vj.days_of_week,
@@ -322,7 +322,7 @@ def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
                 WHEN 'BoxingDay'      THEN MAKE_DATE(YEAR(d.date), 12, 26)
             END AS holiday_date
         FROM txc_vehicle_journeys vj
-        JOIN txc_services s ON s.service_code = vj.service_code
+        JOIN txc_services s ON s.service_id = vj.service_id
         CROSS JOIN UNNEST(vj.days_of_non_operation) AS nod(key)
         CROSS JOIN (
             SELECT DISTINCT DATE_TRUNC('year', range_date) AS year_start
@@ -345,7 +345,7 @@ def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
 
     variable_holiday_dates AS (
         SELECT
-            (s.service_code || ':' || vj.vehicle_journey_id) AS service_id,
+            (s.service_id || ':' || vj.vehicle_journey_id) AS service_id,
             s.start_date,
             s.end_date,
             vj.days_of_week,
@@ -354,7 +354,7 @@ def _insert_calendar_dates(conn: duckdb.DuckDBPyConnection) -> None:
         CROSS JOIN UNNEST(vj.days_of_non_operation) AS nod(key)
         JOIN bank_holiday_map bhm ON bhm.key = nod.key
         JOIN bank_holidays bh     ON bh.title = bhm.value
-        JOIN txc_services s       ON vj.service_code = s.service_code
+        JOIN txc_services s       ON vj.service_id = s.service_id
         WHERE bh.date BETWEEN
             s.start_date AND coalesce(s.end_date, s.start_date + INTERVAL 5 YEARS)
     ),
@@ -403,7 +403,7 @@ def _insert_trips(conn: duckdb.DuckDBPyConnection) -> None:
         (l.line_id || ':' || vj.vehicle_journey_id || ':' || jp.journey_pattern_id)
             AS trip_id,
         l.line_id as route_id,
-        (s.service_code || ':' || vj.vehicle_journey_id) as service_id,
+        (s.service_id || ':' || vj.vehicle_journey_id) as service_id,
         CASE WHEN direction_id = 'inbound'
             THEN s.origin
             ELSE s.destination

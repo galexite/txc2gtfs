@@ -329,7 +329,7 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
     def generate_service_rows():
         for service in services.iterchildren(service_qname):
             # Service code
-            service_code = service.findtext("txc:ServiceCode", None, NS)
+            service_id = service.findtext("txc:ServiceCode", None, NS)
 
             # Operator reference code
             agency_id = service.findtext("txc:RegisteredOperatorRef", None, NS)
@@ -352,7 +352,7 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
             )
 
             yield {
-                "service_code": service_code,
+                "service_id": service_id,
                 "agency_id": agency_id,
                 "mode": mode,
                 "start_date": start_date,
@@ -363,7 +363,7 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
 
     def generate_line_rows():
         for service in services.iterchildren(service_qname):
-            service_code = service.findtext("txc:ServiceCode", None, NS)
+            service_id = service.findtext("txc:ServiceCode", None, NS)
 
             for line in service.iterfind("./txc:Lines/txc:Line", NS):
                 line_id = line.get("id")
@@ -380,7 +380,7 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
                 )
 
                 yield {
-                    "service_code": service_code,
+                    "service_id": service_id,
                     "line_id": line_id,
                     "line_name": line_name,
                     "outbound_description": outbound_description,
@@ -389,7 +389,7 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
 
     def generate_journey_pattern_rows():
         for service in services.iterchildren(service_qname):
-            service_code = service.findtext("txc:ServiceCode", None, NS)
+            service_id = service.findtext("txc:ServiceCode", None, NS)
 
             for pattern in service.iterfind(
                 "./txc:StandardService/txc:JourneyPattern", NS
@@ -411,7 +411,7 @@ def _parse_services(services: etree.Element, metadata: Metadata) -> _ParseResult
                 route_ref = pattern.findtext("txc:RouteRef", None, NS)
 
                 yield {
-                    "service_code": service_code,
+                    "service_id": service_id,
                     "journey_pattern_id": journey_pattern_id,
                     "journey_pattern_section_ids": section_refs,
                     "direction_id": direction,
